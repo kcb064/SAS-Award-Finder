@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -21,7 +22,8 @@ class Settings(BaseSettings):
     )
 
     # Core
-    home_airports: list[str] = Field(default_factory=lambda: ["CPH"])
+    # NoDecode: env values are comma-separated ("CPH,OSL"), not JSON — _split_csv parses them.
+    home_airports: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["CPH"])
     data_dir: Path = Path("./data")
     config_dir: Path = Path("./config")
     port: int = 8617
@@ -58,7 +60,7 @@ class Settings(BaseSettings):
     explore_max_stay_days: int = 14
 
     # Notifications
-    notify_urls: list[str] = Field(default_factory=list)
+    notify_urls: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # Auth
     basic_auth_user: str = ""
