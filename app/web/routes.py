@@ -103,6 +103,30 @@ async def health(request: Request):
     )
 
 
+def _watch_prefill_qs(form: dict, result) -> str:
+    """Query string for the results page's 'Watch this route' link.
+
+    Date windows the user left blank (e.g. arriving from Explore's 'Search this route') are
+    filled from the dates actually found, so the watch form lands ready to submit instead of
+    with empty required fields.
+    """
+    outs = [pt.trip.outbound_date for pt in result.trips]
+    rets = [pt.trip.inbound_date for pt in result.trips if pt.trip.inbound_date]
+    return urlencode({
+        "origin": form["origin"],
+        "destination": form["destination"],
+        "trip_type": form["trip_type"],
+        "cabin": form["cabin"],
+        "out_from": form["out_from"] or (min(outs) if outs else ""),
+        "out_to": form["out_to"] or (max(outs) if outs else ""),
+        "ret_from": form["ret_from"] or (min(rets) if rets else ""),
+        "ret_to": form["ret_to"] or (max(rets) if rets else ""),
+        "min_stay_days": form["min_stay_days"],
+        "max_stay_days": form["max_stay_days"],
+        "min_seats": form["min_seats"],
+    })
+
+
 @router.get("/search")
 async def search(
     request: Request,
@@ -168,6 +192,7 @@ async def search(
                 collapse=bool(collapse),
             )
             context["result"] = result
+            context["watch_qs"] = _watch_prefill_qs(form, result)
         except BudgetExceeded as exc:
             context["error"] = f"Daily SAS request budget reached — {exc}. Try again tomorrow or raise AF_DAILY_REQUEST_BUDGET."
         except FetchError as exc:
@@ -188,6 +213,9 @@ CABIN_CHOICES = [("", "Any cabin"), ("AG", "Economy"), ("AP", "Premium Economy")
 async def watches_page(request: Request):
     svc = _services(request)
     q = request.query_params
+    # Arriving via a 'Watch this route' / '🔔 Watch' link: the form below is prefilled but
+    # nothing is saved yet — the template shows a banner so that's obvious.
+    prefilled = bool(q.get("destination"))
     prefill = {
         "label": q.get("label", ""),
         "origin": (q.get("origin") or svc.settings.default_home).upper(),
@@ -208,6 +236,7 @@ async def watches_page(request: Request):
             "request": request,
             "watches": svc.watches.list_all(),
             "prefill": prefill,
+            "prefilled": prefilled,
             "homes": svc.settings.home_airports,
             "destinations": svc.store.list_destinations(),
             "cabins": CABIN_CHOICES,

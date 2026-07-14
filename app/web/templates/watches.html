@@ -10,8 +10,13 @@
     on the <a href="/alerts">Alerts</a> page, not as push notifications.</div>
 {% endif %}
 
-<form class="card search-form" method="post" action="/watches">
+<form class="card search-form" id="new-watch" method="post" action="/watches">
   <h2>New watch</h2>
+  {% if prefilled and not flash_ok and not flash_err %}
+    <div class="flash ok">Prefilled for
+      {{ prefill.origin }} {{ '⇄' if prefill.trip_type == 'RT' else '→' }} {{ prefill.destination }}
+      — nothing is saved yet. Review the dates, then press <strong>Create watch</strong>.</div>
+  {% endif %}
   <div class="grid">
     <label>Label (optional)
       <input name="label" value="{{ prefill.label }}" maxlength="60" placeholder="e.g. Boston fall trip">

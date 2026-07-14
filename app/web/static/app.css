@@ -110,6 +110,11 @@ td.err { color: var(--err-ink); }
 .watch-link { font-size: .85rem; text-decoration: none; color: var(--accent); margin-left: auto; }
 .watch-link:hover { text-decoration: underline; }
 
+/* 'Watch this route' links land on /watches#new-watch — pulse the prefilled form so it's
+   clear the watch still needs a review + Create click. */
+#new-watch:target { outline: 2px solid var(--accent); outline-offset: 3px; animation: watch-pulse 1.1s ease-out 2; }
+@keyframes watch-pulse { 50% { outline-color: transparent; } }
+
 .badge.ok-badge { background: var(--ok-bg); color: var(--ok-ink); }
 .badge.err-badge { background: var(--err-bg); color: var(--err-ink); }
 .badge.alert-opened { background: var(--ok-bg); color: var(--ok-ink); }

@@ -5,9 +5,7 @@
       {{ 'live fetch' if result.source == 'live' else 'cached' }}
       {% if result.snapshot_age_s is not none %}· {{ (result.snapshot_age_s / 60) | round(0) | int }} min old{% endif %}
     </span>
-    <a class="watch-link"
-       href="/watches?origin={{ form.origin }}&destination={{ form.destination }}&trip_type={{ form.trip_type }}&cabin={{ form.cabin }}&out_from={{ form.out_from }}&out_to={{ form.out_to }}&ret_from={{ form.ret_from }}&ret_to={{ form.ret_to }}&min_stay_days={{ form.min_stay_days }}&max_stay_days={{ form.max_stay_days }}&min_seats={{ form.min_seats }}">
-      🔔 Watch this route</a>
+    <a class="watch-link" href="/watches?{{ watch_qs }}#new-watch">🔔 Watch this route</a>
   </div>
 
   {% if result.trips | length == 0 %}
