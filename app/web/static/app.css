@@ -1,5 +1,6 @@
 /* EuroBonus Award Finder — self-contained styles (no external CSS/CDN). */
 :root {
+  color-scheme: light dark; /* native form controls (date picker, scrollbars) follow the theme */
   --bg: #f6f7f9;
   --card: #ffffff;
   --ink: #1a2230;
@@ -58,6 +59,7 @@ input, select {
   border: 1px solid var(--line); border-radius: 8px; padding: .45rem .55rem;
 }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+input[type="date"], input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
 
 .actions { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; margin-top: .4rem; }
 button {

@@ -27,5 +27,15 @@
     <small>SAS-operated award space via the flysas.com award-finder feed. Points &amp; taxes are
     a seed estimate — verify at booking. Single-user, self-hosted.</small>
   </footer>
+  <script>
+    // Open the native calendar when any part of a date field is clicked,
+    // not just the tiny picker icon on the right.
+    document.addEventListener('click', function (e) {
+      var el = e.target;
+      if (el.tagName === 'INPUT' && el.type === 'date' && typeof el.showPicker === 'function') {
+        try { el.showPicker(); } catch (err) { /* needs a user gesture; ignore */ }
+      }
+    });
+  </script>
 </body>
 </html>
