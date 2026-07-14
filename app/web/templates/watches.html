@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Watches · EuroBonus Award Finder{% endblock %}
+{% block content %}
+
+{% if flash_ok %}<div class="flash ok">{{ flash_ok }}</div>{% endif %}
+{% if flash_err %}<div class="flash err">{{ flash_err }}</div>{% endif %}
+
+{% if not notify_enabled %}
+  <div class="flash err">No notification URLs configured (AF_NOTIFY_URLS) — alerts will only show
+    on the <a href="/alerts">Alerts</a> page, not as push notifications.</div>
+{% endif %}
+
+<form class="card search-form" method="post" action="/watches">
+  <h2>New watch</h2>
+  <div class="grid">
+    <label>Label (optional)
+      <input name="label" value="{{ prefill.label }}" maxlength="60" placeholder="e.g. Boston fall trip">
+    </label>
+    <label>Origin
+      <input list="homes" name="origin" value="{{ prefill.origin }}" maxlength="3" required>
+      <datalist id="homes">
+        {% for h in homes %}<option value="{{ h }}">{% endfor %}
+      </datalist>
+    </label>
+    <label>Destination
+      <input list="dests" name="destination" value="{{ prefill.destination }}" maxlength="3"
+             placeholder="e.g. BOS" required>
+      <datalist id="dests">
+        {% for d in destinations %}<option value="{{ d.code }}">{{ d.code }} — {{ d.city_name or d.code }}</option>{% endfor %}
+      </datalist>
+    </label>
+    <label>Trip
+      <select name="trip_type">
+        <option value="RT" {{ 'selected' if prefill.trip_type == 'RT' }}>Round-trip</option>
+        <option value="OW" {{ 'selected' if prefill.trip_type == 'OW' }}>One-way</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="grid">
+    <label>Outbound from
+      <input type="date" name="date_from" value="{{ prefill.date_from }}" min="{{ today }}" required>
+    </label>
+    <label>Outbound to
+      <input type="date" name="date_to" value="{{ prefill.date_to }}" min="{{ today }}" required>
+    </label>
+    <label class="rt-only">Return from
+      <input type="date" name="return_from" value="{{ prefill.return_from }}" min="{{ today }}">
+    </label>
+    <label class="rt-only">Return to
+      <input type="date" name="return_to" value="{{ prefill.return_to }}" min="{{ today }}">
+    </label>
+  </div>
+
+  <div class="grid">
+    <label>Cabin
+      <select name="cabin">
+        {% for val, name in cabins %}
+          <option value="{{ val }}" {{ 'selected' if prefill.cabin == val }}>{{ name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="rt-only">Min stay (days)
+      <input type="number" name="min_stay_days" value="{{ prefill.min_stay_days }}" min="0" max="365">
+    </label>
+    <label class="rt-only">Max stay (days)
+      <input type="number" name="max_stay_days" value="{{ prefill.max_stay_days }}" min="1" max="365">
+    </label>
+    <label>Min seats / cabin
+      <input type="number" name="min_seats" value="{{ prefill.min_seats }}" min="1" max="9">
+    </label>
+  </div>
+
+  <div class="grid">
+    <label class="checkbox">
+      <input type="checkbox" name="sas_only" value="1" checked>
+      SAS-operated only
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="voucher_mode" value="1">
+      🎟️ Voucher hunt (2-for-1: ≥2 seats, both legs)
+    </label>
+  </div>
+
+  <div class="actions">
+    <button type="submit">Create watch</button>
+    <span class="hint">Watched routes are re-checked in the background; you get a push when a
+      bookable trip opens, gets cheaper, or disappears.</span>
+  </div>
+</form>
+
+<section class="card">
+  <h2>Your watches</h2>
+  {% if watches %}
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Watch</th><th>Cabin</th><th>Outbound</th><th>Return</th><th>Stay</th><th>Seats</th>
+          <th>State</th><th>Last check</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for w in watches %}
+        <tr class="{{ 'watch-disabled' if not w.enabled }}">
+          <td>
+            {{ w.display }}
+            {% if w.voucher_mode %}<span class="badge voucher" title="2-for-1 voucher hunt">🎟️</span>{% endif %}
+            {% if not w.enabled %}<span class="badge">paused</span>{% endif %}
+          </td>
+          <td>{{ cabin_name(w.cabin) if w.cabin else 'Any' }}</td>
+          <td>{{ w.date_from }} → {{ w.date_to }}</td>
+          <td>{% if w.trip_type == 'RT' %}{{ w.return_from }} → {{ w.return_to }}{% else %}<span class="muted">one-way</span>{% endif %}</td>
+          <td>{% if w.trip_type == 'RT' %}{{ w.min_stay_days }}–{{ w.max_stay_days }}d{% else %}—{% endif %}</td>
+          <td>{{ w.effective_min_seats }}</td>
+          <td>
+            {% if w.last_run_at is none %}
+              <span class="muted">not checked yet</span>
+            {% elif w.last_status == 'failed' %}
+              <span class="badge err-badge">check failed ×{{ w.consecutive_failures }}</span>
+            {% elif w.had_bookable %}
+              <span class="badge ok-badge">bookable · {{ w.best_points | int }} pts</span>
+            {% else %}
+              <span class="badge">nothing yet</span>
+            {% endif %}
+          </td>
+          <td>{% if w.last_run_at %}{{ w.last_run_at[:16].replace('T', ' ') }}{% else %}—{% endif %}</td>
+          <td class="row-actions">
+            <form method="post" action="/watches/{{ w.id }}/run"><button class="btn-small" {{ 'disabled' if not w.enabled }}>Check now</button></form>
+            <form method="post" action="/watches/{{ w.id }}/toggle"><button class="btn-small btn-quiet">{{ 'Pause' if w.enabled else 'Resume' }}</button></form>
+            <form method="post" action="/watches/{{ w.id }}/delete"
+                  onsubmit="return confirm('Delete this watch?');">
+              <button class="btn-small btn-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No watches yet. Create one above, or run a <a href="/search">Search</a> and use
+    “Watch this route”.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Alerts · EuroBonus Award Finder{% endblock %}
+{% block content %}
+
+<section class="card">
+  <h2>Alerts</h2>
+  {% if not notify_enabled %}
+    <p class="muted">No notification URLs configured (AF_NOTIFY_URLS) — alerts are logged here
+      but not pushed.</p>
+  {% endif %}
+  {% if alerts %}
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>When (UTC)</th><th>Type</th><th>Watch</th><th>Alert</th><th>Delivery</th></tr>
+      </thead>
+      <tbody>
+        {% for a in alerts %}
+        <tr>
+          <td>{{ a.created_at[:16].replace('T', ' ') }}</td>
+          <td><span class="badge alert-{{ a.type }}">{{ a.type.replace('_', ' ') }}</span></td>
+          <td>
+            {% if a.watch_id %}
+              {{ a.watch_label or ((a.watch_origin or '') ~ '⇄' ~ (a.watch_destination or '')) }}
+            {% else %}<span class="muted">system</span>{% endif %}
+          </td>
+          <td class="alert-cell">
+            <strong>{{ a.title }}</strong>
+            {% if a.body %}<div class="alert-body muted">{{ a.body | replace('\n', ' · ') }}</div>{% endif %}
+          </td>
+          <td>
+            {% if a.delivered_at %}
+              <span class="badge ok-badge">sent</span>
+            {% else %}
+              <span class="badge err-badge">pending ×{{ a.delivery_attempts }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No alerts yet. They appear here when a <a href="/watches">watch</a> finds a
+    change — and are pushed via your configured notification channels.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

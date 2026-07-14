@@ -1,0 +1,33 @@
+# EuroBonus Award Finder — Dockge / TrueNAS SCALE stack.
+# Pulls the prebuilt image from GHCR (built by .github/workflows/docker-publish.yml, which bakes
+# in real Google Chrome). Port 8617 (uncommon).
+services:
+  award-finder:
+    image: ghcr.io/kcb064/sas-award-finder:latest
+    # To build locally instead of pulling (e.g. for Dockerfile changes), swap `image:` for:
+    #   build: .
+    container_name: eurobonus-award-finder
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Sensible defaults; override in .env. Data/config paths are fixed to the volume mounts.
+      AF_DATA_DIR: /data
+      AF_CONFIG_DIR: /config
+      AF_PORT: "8617"
+      AF_HEADLESS: "true"
+      AF_BROWSER_CHANNEL: chrome
+    volumes:
+      - ./data:/data        # SQLite (WAL), persistent browser profile, raw JSON snapshots
+      - ./config:/config    # points_table.yaml (seeded from image defaults on first run)
+    ports:
+      # For Cloudflare-tunnel-only access, delete this block and put the container on the
+      # cloudflared network instead, exposing award-finder:8617 as a tunnel hostname.
+      - "8617:8617"
+    shm_size: "1gb"          # headroom for Chrome (we also pass --disable-dev-shm-usage)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8617/health').status==200 else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

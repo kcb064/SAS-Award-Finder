@@ -1,0 +1,100 @@
+<section class="results">
+  <div class="results-head">
+    <h2>{{ result.origin }}{% if result.trip_type == 'RT' %} ⇄ {% else %} → {% endif %}{{ result.destination }}</h2>
+    <span class="badge {{ 'live' if result.source == 'live' else 'cache' }}">
+      {{ 'live fetch' if result.source == 'live' else 'cached' }}
+      {% if result.snapshot_age_s is not none %}· {{ (result.snapshot_age_s / 60) | round(0) | int }} min old{% endif %}
+    </span>
+    <a class="watch-link"
+       href="/watches?origin={{ form.origin }}&destination={{ form.destination }}&trip_type={{ form.trip_type }}&cabin={{ form.cabin }}&out_from={{ form.out_from }}&out_to={{ form.out_to }}&ret_from={{ form.ret_from }}&ret_to={{ form.ret_to }}&min_stay_days={{ form.min_stay_days }}&max_stay_days={{ form.max_stay_days }}&min_seats={{ form.min_seats }}">
+      🔔 Watch this route</a>
+  </div>
+
+  {% if result.trips | length == 0 %}
+    <p class="muted">No bookable {{ 'round-trips' if result.trip_type == 'RT' else 'flights' }}
+      match those filters. Try widening the date windows, lowering min seats, or switching cabin.</p>
+  {% else %}
+    <p class="muted">{{ result.trips | length }} option{{ 's' if result.trips | length != 1 }}.
+      Points &amp; taxes are per person from the seed zone table. Value = cents of cash value per
+      point after taxes ("est." until you save a real cash price below).</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Cabin</th>
+            <th>Outbound</th>
+            {% if result.trip_type == 'RT' %}<th>Return</th><th>Stay</th>{% endif %}
+            <th>Seats</th>
+            <th>Points{% if result.trip_type == 'RT' %} (r/t){% endif %}</th>
+            <th>Taxes</th>
+            <th>Value</th>
+            <th>2-for-1</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pt in result.trips %}
+          {% set t = pt.trip %}
+          {% set p = pt.price %}
+          {% set v = pt.value %}
+          <tr>
+            <td><span class="cabin cabin-{{ t.cabin }}">{{ cabin_name(t.cabin) }}</span></td>
+            <td>{{ t.outbound_date }}</td>
+            {% if result.trip_type == 'RT' %}
+              <td>{{ t.inbound_date }}</td>
+              <td>{{ t.stay_days }}d</td>
+            {% endif %}
+            <td>
+              {{ t.out_seats }}{% if result.trip_type == 'RT' %} / {{ t.in_seats }}{% endif %}
+            </td>
+            <td>{{ p.points_total | int }}</td>
+            <td>{{ p.taxes_total | money }}</td>
+            <td>
+              {% if v and v.cpp is not none %}
+                <span title="cash {{ '≈' if v.cash_source == 'estimate' }}{{ v.cash_total | money }} per person ({{ v.cash_source }})">
+                  {{ '%.2f' | format(v.cpp) }}¢{% if v.cash_source == 'estimate' %} <span class="muted">est.</span>{% endif %}
+                </span>
+                {% if v.cpp_voucher is not none %}
+                  <span class="badge voucher" title="cents per point with the 2-for-1 voucher (2 pax on one award)">
+                    🎟 {{ '%.2f' | format(v.cpp_voucher) }}¢
+                  </span>
+                {% endif %}
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if p.voucher_eligible %}
+                <span class="badge voucher" title="Both legs SAS-operated with ≥2 seats">
+                  ✓ {{ p.points_per_person_voucher | int }}/pp
+                </span>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <form class="cash-fare-form" method="post" action="/value/cash-fare">
+      <input type="hidden" name="origin" value="{{ result.origin }}">
+      <input type="hidden" name="destination" value="{{ result.destination }}">
+      <input type="hidden" name="trip_type" value="{{ result.trip_type }}">
+      <input type="hidden" name="next" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+      <label>Real cash price ({{ 'round-trip' if result.trip_type == 'RT' else 'one-way' }}, per person, USD)
+        <input type="text" name="price" inputmode="decimal" placeholder="e.g. 2450">
+      </label>
+      <label>Cabin
+        <select name="cabin">
+          {% for val, name in cabins if val %}
+            <option value="{{ val }}" {{ 'selected' if (form.cabin or 'AB') == val }}>{{ name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Save price</button>
+      <span class="hint">Sharpens the Value column for this route — check flysas.com or Google
+        Flights for the same dates. Leave empty and save to go back to the estimate.</span>
+    </form>
+  {% endif %}
+</section>

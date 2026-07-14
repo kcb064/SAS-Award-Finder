@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Status · EuroBonus Award Finder{% endblock %}
+{% block content %}
+
+<section class="card">
+  <h2>Status</h2>
+  <div class="stat-row">
+    <div class="stat"><span class="stat-num">{{ budget_used }}</span><span class="stat-label">SAS requests today</span></div>
+    <div class="stat"><span class="stat-num">{{ budget_remaining }}</span><span class="stat-label">budget remaining (of {{ budget_limit }})</span></div>
+    <div class="stat"><span class="stat-num">{{ 'yes' if fetcher_started else 'no' }}</span><span class="stat-label">browser session warm</span></div>
+    <div class="stat"><span class="stat-num">{{ homes | join(', ') }}</span><span class="stat-label">home airports</span></div>
+  </div>
+  <form method="post" action="/refresh" class="actions">
+    <button type="submit">Refresh network catalog now</button>
+    <span class="hint">Fetches the outbound-only all-destinations feed for each home airport (1 request each).</span>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Recent snapshots</h3>
+  {% if snapshots %}
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Fetched (UTC)</th><th>Origin</th><th>Scope</th><th>Dest</th><th>Status</th><th>Dests</th><th>Size</th></tr></thead>
+      <tbody>
+        {% for s in snapshots %}
+        <tr>
+          <td>{{ s.fetched_at[:19] }}</td>
+          <td>{{ s.origin }}</td>
+          <td>{{ s.scope }}</td>
+          <td>{{ s.destination or '—' }}</td>
+          <td>{{ s.status }}</td>
+          <td>{{ s.dest_count }}</td>
+          <td>{{ (s.byte_size / 1024) | round(0) | int }} KB</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No snapshots yet. Run a search or refresh the catalog.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h3>Recent SAS requests</h3>
+  {% if calls %}
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>When (UTC)</th><th>Scope</th><th>Origin</th><th>Dest</th><th>Status</th><th>HTTP</th><th>Size</th><th>ms</th></tr></thead>
+      <tbody>
+        {% for c in calls %}
+        <tr>
+          <td>{{ c.created_at[:19] }}</td>
+          <td>{{ c.scope }}</td>
+          <td>{{ c.origin }}</td>
+          <td>{{ c.destination or '—' }}</td>
+          <td class="{{ 'ok' if c.status == 'ok' else 'err' }}">{{ c.status }}</td>
+          <td>{{ c.http_status or '—' }}</td>
+          <td>{{ (c.byte_size / 1024) | round(0) | int }} KB</td>
+          <td>{{ c.duration_ms }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No requests recorded yet.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

@@ -1,0 +1,47 @@
+[project]
+name = "eurobonus-award-finder"
+version = "0.1.0"
+description = "Self-hosted finder for SAS EuroBonus award flights (SAS-operated), with round-trip pairing, watches, and 2-for-1 voucher value."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<0.116",
+    "uvicorn[standard]>=0.32,<0.33",
+    "jinja2>=3.1,<4",
+    "python-multipart>=0.0.12",
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.6,<3",
+    "playwright==1.61.0",   # pinned: must match the Playwright base-image tag in the Dockerfile
+    "apscheduler>=3.11,<4",
+    "apprise>=1.9,<2",
+    "tenacity>=9.0,<10",
+    "pyyaml>=6.0,<7",
+    "httpx>=0.28,<0.29",    # seats.aero fallback provider (also used by tests)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<0.25",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+# Ship non-Python assets in the wheel so the installed package is self-contained (migrations,
+# templates, static). Runtime also resolves these via __file__ from the source tree.
+app = ["migrations/*.sql"]
+"app.web" = ["templates/*.html", "static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

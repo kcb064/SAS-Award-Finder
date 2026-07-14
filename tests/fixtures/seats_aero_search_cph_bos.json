@@ -1,0 +1,51 @@
+{
+  "data": [
+    {
+      "ID": "sa-1",
+      "Route": {"ID": "r-1", "OriginAirport": "CPH", "DestinationAirport": "BOS", "Source": "eurobonus", "Distance": 3411},
+      "Date": "2026-11-02",
+      "YAvailable": true, "YRemainingSeats": 5, "YAirlines": "SK", "YMileageCost": "45000", "YDirect": true,
+      "WAvailable": false, "WRemainingSeats": 0, "WAirlines": "",
+      "JAvailable": true, "JRemainingSeats": 2, "JAirlines": "SK", "JMileageCost": "90000", "JDirect": true,
+      "FAvailable": false, "FRemainingSeats": 0, "FAirlines": ""
+    },
+    {
+      "ID": "sa-2",
+      "Route": {"ID": "r-1", "OriginAirport": "CPH", "DestinationAirport": "BOS", "Source": "eurobonus", "Distance": 3411},
+      "Date": "2026-11-04",
+      "YAvailable": true, "YRemainingSeats": 0, "YAirlines": "SK",
+      "JAvailable": true, "JRemainingSeats": 3, "JAirlines": "SK, KL",
+      "FAvailable": false
+    },
+    {
+      "ID": "sa-3",
+      "Route": {"ID": "r-2", "OriginAirport": "BOS", "DestinationAirport": "CPH", "Source": "eurobonus", "Distance": 3411},
+      "Date": "2026-11-09",
+      "YAvailable": true, "YRemainingSeats": 4, "YAirlines": "SK",
+      "JAvailable": true, "JRemainingSeats": 2, "JAirlines": "SK",
+      "FAvailable": false
+    },
+    {
+      "ID": "sa-4",
+      "Route": {"ID": "r-3", "OriginAirport": "CPH", "DestinationAirport": "BOS", "Source": "aeroplan", "Distance": 3411},
+      "Date": "2026-11-02",
+      "YAvailable": true, "YRemainingSeats": 9, "YAirlines": "AC"
+    },
+    {
+      "ID": "sa-5",
+      "Route": {"ID": "r-4", "OriginAirport": "CPH", "DestinationAirport": "EWR", "Source": "eurobonus", "Distance": 3800},
+      "Date": "2026-11-03",
+      "YAvailable": true, "YRemainingSeats": 6, "YAirlines": "SK",
+      "FAvailable": true, "FRemainingSeats": 1, "FAirlines": "SK"
+    },
+    {
+      "ID": "sa-6",
+      "Route": {"ID": "r-5", "OriginAirport": "OSL", "DestinationAirport": "BOS", "Source": "eurobonus", "Distance": 3300},
+      "Date": "2026-11-05",
+      "JAvailable": true, "JRemainingSeats": 2, "JAirlines": "SK"
+    }
+  ],
+  "count": 6,
+  "hasMore": false,
+  "cursor": null
+}

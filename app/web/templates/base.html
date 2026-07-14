@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}EuroBonus Award Finder{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✈️</text></svg>">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="brand" href="/search">✈️ EuroBonus Award Finder</a>
+      <nav>
+        <a href="/search">Search</a>
+        <a href="/explore">Explore</a>
+        <a href="/watches">Watches</a>
+        <a href="/alerts">Alerts</a>
+        <a href="/status">Status</a>
+      </nav>
+    </div>
+  </header>
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="wrap muted">
+    <small>SAS-operated award space via the flysas.com award-finder feed. Points &amp; taxes are
+    a seed estimate — verify at booking. Single-user, self-hosted.</small>
+  </footer>
+</body>
+</html>

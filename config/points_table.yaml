@@ -1,0 +1,126 @@
+# SAS EuroBonus points + taxes zone table (SEED — tune against SAS's published award chart).
+#
+# The award-finder feed gives seat availability but NOT points price or taxes (SAS award flights
+# are fixed-price). This table supplies them at display time. Values are one-way, per person,
+# per cabin, for SAS-operated award flights, and are SYMMETRIC by zone pair (order-independent).
+#
+# Cabins: AG = Economy, AP = Premium Economy, AB = Business.
+# These are approximate seed numbers — edit to match the current chart; they only affect the
+# displayed points/cpp, never availability.
+
+# Zone membership by country (as the feed spells countryName). Airport-code overrides win.
+zones:
+  SCANDINAVIA: [Denmark, Sweden, Norway, Finland, Iceland]
+  EUROPE:
+    - United Kingdom
+    - Ireland
+    - France
+    - Germany
+    - Spain
+    - Portugal
+    - Italy
+    - Netherlands
+    - Belgium
+    - Switzerland
+    - Austria
+    - Poland
+    - Greece
+    - Croatia
+    - Czech Republic
+    - Hungary
+    - Estonia
+    - Latvia
+    - Lithuania
+    - Luxembourg
+    - Malta
+    - Romania
+    - Bulgaria
+    - Slovakia
+    - Slovenia
+    - Cyprus
+  NORTH_AMERICA: [United States of America, United States, USA, Canada, Mexico]
+  ASIA: [China, Japan, "Hong Kong", Thailand, Singapore, India, "South Korea", Vietnam, Malaysia, Indonesia]
+  MIDDLE_EAST: ["United Arab Emirates", Qatar, Israel, "Saudi Arabia", Turkey]
+  AFRICA: ["South Africa", Egypt, Morocco, Kenya, Ethiopia, Nigeria]
+  OCEANIA: [Australia, "New Zealand"]
+  SOUTH_AMERICA: [Brazil, Argentina, Chile, Peru, Colombia]
+
+# Explicit IATA -> zone overrides (e.g. home airports, edge cases).
+airport_zones:
+  CPH: SCANDINAVIA
+  ARN: SCANDINAVIA
+  OSL: SCANDINAVIA
+  GOT: SCANDINAVIA
+  STO: SCANDINAVIA
+
+# Fallback zone when a country isn't listed above.
+default_zone: EUROPE
+
+# One-way points by unordered zone pair "A|B" (sorted alphabetically) and cabin.
+points:
+  EUROPE|EUROPE:                 {AG: 16000, AP: 24000, AB: 32000}
+  EUROPE|SCANDINAVIA:            {AG: 16000, AP: 24000, AB: 32000}
+  SCANDINAVIA|SCANDINAVIA:       {AG: 7000,  AP: 11000, AB: 14000}
+  NORTH_AMERICA|SCANDINAVIA:     {AG: 45000, AP: 60000, AB: 80000}
+  EUROPE|NORTH_AMERICA:          {AG: 45000, AP: 60000, AB: 80000}
+  ASIA|SCANDINAVIA:              {AG: 50000, AP: 70000, AB: 95000}
+  ASIA|EUROPE:                   {AG: 50000, AP: 70000, AB: 95000}
+  MIDDLE_EAST|SCANDINAVIA:       {AG: 35000, AP: 50000, AB: 70000}
+  EUROPE|MIDDLE_EAST:            {AG: 35000, AP: 50000, AB: 70000}
+  AFRICA|SCANDINAVIA:            {AG: 45000, AP: 60000, AB: 85000}
+  AFRICA|EUROPE:                 {AG: 45000, AP: 60000, AB: 85000}
+  OCEANIA|SCANDINAVIA:           {AG: 65000, AP: 90000, AB: 120000}
+  ASIA|OCEANIA:                  {AG: 65000, AP: 90000, AB: 120000}
+  SCANDINAVIA|SOUTH_AMERICA:     {AG: 55000, AP: 75000, AB: 100000}
+  EUROPE|SOUTH_AMERICA:          {AG: 55000, AP: 75000, AB: 100000}
+
+# Fallback points when a zone pair isn't listed (keeps the app from showing blanks).
+default_points: {AG: 45000, AP: 60000, AB: 80000}
+
+# Rough per-leg taxes/fees in USD by unordered zone pair (verify at booking — these are estimates).
+taxes:
+  EUROPE|EUROPE: 20
+  EUROPE|SCANDINAVIA: 20
+  SCANDINAVIA|SCANDINAVIA: 15
+  NORTH_AMERICA|SCANDINAVIA: 90
+  EUROPE|NORTH_AMERICA: 90
+  ASIA|SCANDINAVIA: 80
+  ASIA|EUROPE: 80
+  MIDDLE_EAST|SCANDINAVIA: 70
+  EUROPE|MIDDLE_EAST: 70
+  AFRICA|SCANDINAVIA: 85
+  AFRICA|EUROPE: 85
+  OCEANIA|SCANDINAVIA: 110
+  ASIA|OCEANIA: 90
+  SCANDINAVIA|SOUTH_AMERICA: 95
+  EUROPE|SOUTH_AMERICA: 95
+default_taxes: 60
+
+# Extra per-leg tax when DEPARTING these countries, by cabin (e.g. UK Air Passenger Duty). Applied
+# to whichever leg departs the country, so a round trip touching the UK is taxed asymmetrically.
+departure_country_surcharge:
+  United Kingdom: {AG: 50, AP: 110, AB: 220}
+
+# --- Cash-fare ESTIMATES for cpp (Phase 4) ---------------------------------------------------
+# Typical ROUND-TRIP cash price per person (USD) by unordered zone pair and cabin. These feed the
+# points-value math (cpp = cents of cash value per point) when no manual price has been entered
+# for a route — the UI marks them "est.". Enter a real quote on the Search page to override.
+cash_estimates:
+  SCANDINAVIA|SCANDINAVIA:       {AG: 160,  AP: 260,  AB: 420}
+  EUROPE|SCANDINAVIA:            {AG: 220,  AP: 420,  AB: 750}
+  EUROPE|EUROPE:                 {AG: 220,  AP: 420,  AB: 750}
+  NORTH_AMERICA|SCANDINAVIA:     {AG: 700,  AP: 1400, AB: 2800}
+  EUROPE|NORTH_AMERICA:          {AG: 700,  AP: 1400, AB: 2800}
+  ASIA|SCANDINAVIA:              {AG: 900,  AP: 1700, AB: 3200}
+  ASIA|EUROPE:                   {AG: 900,  AP: 1700, AB: 3200}
+  MIDDLE_EAST|SCANDINAVIA:       {AG: 600,  AP: 1100, AB: 2200}
+  EUROPE|MIDDLE_EAST:            {AG: 600,  AP: 1100, AB: 2200}
+  AFRICA|SCANDINAVIA:            {AG: 800,  AP: 1500, AB: 2800}
+  AFRICA|EUROPE:                 {AG: 800,  AP: 1500, AB: 2800}
+  OCEANIA|SCANDINAVIA:           {AG: 1500, AP: 2600, AB: 4500}
+  ASIA|OCEANIA:                  {AG: 1500, AP: 2600, AB: 4500}
+  SCANDINAVIA|SOUTH_AMERICA:     {AG: 1000, AP: 1900, AB: 3400}
+  EUROPE|SOUTH_AMERICA:          {AG: 1000, AP: 1900, AB: 3400}
+
+# Fallback round-trip cash estimate when a zone pair isn't listed.
+default_cash: {AG: 700, AP: 1400, AB: 2800}

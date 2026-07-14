@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Explore · EuroBonus Award Finder{% endblock %}
+{% block content %}
+
+{% if flash_ok %}<div class="flash ok">{{ flash_ok }}</div>{% endif %}
+{% if flash_err %}<div class="flash err">{{ flash_err }}</div>{% endif %}
+
+<section class="card">
+  <div class="results-head">
+    <h2>Explore from {{ origin }}</h2>
+    {% if snapshot %}
+      <span class="badge cache" title="{{ snapshot.fetched_at }}">
+        network snapshot {{ snapshot.fetched_at | ago }} · {{ overview | length }} destinations
+      </span>
+    {% endif %}
+    <span class="watch-link"></span>
+  </div>
+
+  <div class="actions">
+    {% if homes | length > 1 %}
+    <form method="get" action="/explore">
+      <select name="origin" onchange="this.form.submit()">
+        {% for h in homes %}<option value="{{ h }}" {{ 'selected' if h == origin }}>{{ h }}</option>{% endfor %}
+      </select>
+      <noscript><button class="btn-small">Go</button></noscript>
+    </form>
+    {% endif %}
+    <form method="post" action="/refresh">
+      <input type="hidden" name="next" value="/explore?origin={{ origin }}">
+      <button class="btn-small btn-quiet">Refresh network snapshot</button>
+    </form>
+    <form method="post" action="/explore/sweep">
+      <input type="hidden" name="origin" value="{{ origin }}">
+      <button class="btn-small">Refresh top leads now (≤{{ sweep_budget }} fetches)</button>
+    </form>
+    <span class="hint">Destinations are ranked by your interest × award availability from the
+      free network snapshot. Round-trip leads cost one SAS request per destination — the nightly
+      sweep keeps the most interesting ones fresh.</span>
+  </div>
+</section>
+
+{% if not snapshot %}
+<section class="card">
+  <p class="muted">No network snapshot yet for {{ origin }} — hit <strong>Refresh network
+  snapshot</strong> above to pull the full award network (one request).</p>
+</section>
+{% else %}
+
+{% for o in overview %}
+{% set dest_leads = leads.get(o.code, []) %}
+<details class="dest {{ 'dest-muted' if o.interest == 0 }}">
+  <summary>
+    <span class="dest-rank">{{ loop.index }}</span>
+    <span class="dest-name">
+      <strong>{{ o.code }}</strong>
+      {{ o.city_name or '' }}{% if o.country_name %}<span class="muted">, {{ o.country_name }}</span>{% endif %}
+    </span>
+    <span class="dest-stars" title="Interest weight {{ o.interest }} of 3">
+      {%- if o.interest == 0 -%}<span class="muted">skip</span>
+      {%- else -%}{% for _ in range(o.interest) %}★{% endfor %}{%- endif -%}
+    </span>
+    <span class="dest-chips">
+      {% for cab in ['AB', 'AP', 'AG'] %}
+        {% set a = o.cabins.get(cab) %}
+        {% if a %}
+          <span class="chip chip-{{ cab }}" title="{{ cabin_name(cab) }}: {{ a.days }} days with seats, {{ a.pair_days }} with ≥2 (voucher pairs)">
+            {{ cabin_name(cab).split(' ')[0] }} {{ a.days }}d{% if a.pair_days %} · {{ a.pair_days }}×2+{% endif %}
+          </span>
+        {% endif %}
+      {% endfor %}
+    </span>
+    <span class="dest-tail muted">
+      {% if o.cabins.get('AB') %}~{{ o.est_points['AB'] | int }} pts Biz r/t{% else %}~{{ o.est_points['AG'] | int }} pts Econ r/t{% endif %}
+      ·
+      {% if dest_leads %}{{ dest_leads | length }} lead{{ 's' if dest_leads | length != 1 }} · {{ o.leads_computed_at | ago }}{% else %}no leads yet{% endif %}
+    </span>
+  </summary>
+
+  <div class="dest-body">
+    <div class="actions">
+      <form method="post" action="/explore/interest">
+        <input type="hidden" name="origin" value="{{ origin }}">
+        <input type="hidden" name="destination" value="{{ o.code }}">
+        <select name="interest">
+          <option value="0" {{ 'selected' if o.interest == 0 }}>0 — skip</option>
+          <option value="1" {{ 'selected' if o.interest == 1 }}>★ normal</option>
+          <option value="2" {{ 'selected' if o.interest == 2 }}>★★ high</option>
+          <option value="3" {{ 'selected' if o.interest == 3 }}>★★★ must-track</option>
+        </select>
+        <button class="btn-small btn-quiet">Set interest</button>
+      </form>
+      <form method="post" action="/explore/refresh">
+        <input type="hidden" name="origin" value="{{ origin }}">
+        <input type="hidden" name="destination" value="{{ o.code }}">
+        <button class="btn-small">Refresh leads (1 fetch)</button>
+      </form>
+      <a class="watch-link" href="/search?origin={{ origin }}&destination={{ o.code }}">Search this route →</a>
+      <span class="hint">Outbound award dates {{ o.first_date }} … {{ o.last_date }}
+        {% if o.route_fetched_at %}· route data {{ o.route_fetched_at | ago }}{% endif %}</span>
+    </div>
+
+    {% if dest_leads %}
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Month</th><th>Cabin</th><th>Out</th><th>Back</th><th>Stay</th><th>Seats</th>
+            <th>Points (r/t)</th><th>Taxes</th><th>Value</th><th>2-for-1</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in dest_leads %}
+          <tr>
+            <td>{{ l.month | month_label }}</td>
+            <td><span class="cabin cabin-{{ l.cabin }}">{{ cabin_name(l.cabin) }}</span></td>
+            <td>{{ l.outbound_date }}</td>
+            <td>{{ l.inbound_date }}</td>
+            <td>{{ l.stay_days }}d</td>
+            <td>{{ l.out_seats }} / {{ l.in_seats }}</td>
+            <td>{{ l.points_total | int }}</td>
+            <td>{{ l.taxes_total | money }}</td>
+            <td>
+              {% if l.cpp is not none %}
+                <span title="cash {{ '≈' if l.cash_source == 'estimate' }}{{ l.cash_total | money }} per person ({{ l.cash_source }})">
+                  {{ '%.2f' | format(l.cpp) }}¢{% if l.cash_source == 'estimate' %} <span class="muted">est.</span>{% endif %}
+                </span>
+                {% if l.cpp_voucher is not none %}
+                  <span class="badge voucher" title="cents per point with the 2-for-1 voucher">🎟 {{ '%.2f' | format(l.cpp_voucher) }}¢</span>
+                {% endif %}
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
+            <td>
+              {% if l.voucher_eligible %}
+                <span class="badge voucher" title="Both legs SAS-operated with ≥2 seats">🎟️ ✓</span>
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
+            <td class="row-actions">
+              <a class="btn-small btn-link" href="/watches?{{ l.watch_qs }}">🔔 Watch</a>
+              <a class="btn-small btn-link" href="{{ l.book_url }}" target="_blank" rel="noopener">Book ↗</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">Best bookable round-trip per month &amp; cabin, {{ stay[0] }}–{{ stay[1] }} day
+      stays. Points &amp; taxes per person from the seed zone table; Value is cents per point
+      ("est." until you save a real cash price on the Search page).</p>
+    {% else %}
+    <p class="muted">No cached round-trip leads yet — <em>Refresh leads</em> fetches this route
+      (both directions) and keeps the best trip per month &amp; cabin.</p>
+    {% endif %}
+  </div>
+</details>
+{% endfor %}
+{% endif %}
+
+{% endblock %}

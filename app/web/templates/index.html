@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if request.query_params.get('refreshed') %}
+  <div class="flash ok">Network catalog refreshed.</div>
+{% endif %}
+{% if request.query_params.get('refresh_error') %}
+  <div class="flash err">Refresh error: {{ request.query_params.get('refresh_error') }}</div>
+{% endif %}
+{% if request.query_params.get('ok') %}
+  <div class="flash ok">{{ request.query_params.get('ok') }}</div>
+{% endif %}
+{% if request.query_params.get('err') %}
+  <div class="flash err">{{ request.query_params.get('err') }}</div>
+{% endif %}
+
+<form class="card search-form" method="get" action="/search">
+  <div class="grid">
+    <label>Origin
+      <input list="homes" name="origin" value="{{ form.origin }}" maxlength="3" required>
+      <datalist id="homes">
+        {% for h in homes %}<option value="{{ h }}">{% endfor %}
+      </datalist>
+    </label>
+
+    <label>Destination
+      <input list="dests" name="destination" value="{{ form.destination }}" maxlength="3"
+             placeholder="e.g. BOS" required>
+      <datalist id="dests">
+        {% for d in destinations %}<option value="{{ d.code }}">{{ d.code }} — {{ d.city_name or d.code }}</option>{% endfor %}
+      </datalist>
+    </label>
+
+    <label>Trip
+      <select name="trip_type">
+        <option value="RT" {{ 'selected' if form.trip_type == 'RT' }}>Round-trip</option>
+        <option value="OW" {{ 'selected' if form.trip_type == 'OW' }}>One-way</option>
+      </select>
+    </label>
+
+    <label>Cabin
+      <select name="cabin">
+        {% for val, name in cabins %}
+          <option value="{{ val }}" {{ 'selected' if form.cabin == val }}>{{ name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <div class="grid">
+    <label>Outbound from
+      <input type="date" name="out_from" value="{{ form.out_from }}">
+    </label>
+    <label>Outbound to
+      <input type="date" name="out_to" value="{{ form.out_to }}">
+    </label>
+    <label class="rt-only">Return from
+      <input type="date" name="ret_from" value="{{ form.ret_from }}">
+    </label>
+    <label class="rt-only">Return to
+      <input type="date" name="ret_to" value="{{ form.ret_to }}">
+    </label>
+  </div>
+
+  <div class="grid">
+    <label class="rt-only">Min stay (days)
+      <input type="number" name="min_stay_days" value="{{ form.min_stay_days }}" min="0" max="365">
+    </label>
+    <label class="rt-only">Max stay (days)
+      <input type="number" name="max_stay_days" value="{{ form.max_stay_days }}" min="1" max="365">
+    </label>
+    <label>Min seats / cabin
+      <input type="number" name="min_seats" value="{{ form.min_seats }}" min="1" max="9">
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="collapse" value="1" {{ 'checked' if form.collapse }}>
+      Best return per date
+    </label>
+  </div>
+
+  <div class="actions">
+    <button type="submit">Search award space</button>
+    <span class="hint">Voucher hint: set min seats to 2 to hunt 2-for-1 eligible trips
+      (you have {{ voucher_count }}).</span>
+  </div>
+</form>
+
+{% if error %}
+  <div class="flash err">{{ error }}</div>
+{% endif %}
+
+{% if result is not none %}
+  {% include "_results.html" %}
+{% endif %}
+
+{% endblock %}
