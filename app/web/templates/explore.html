@@ -10,7 +10,8 @@
     <h2>Explore from {{ origin }}</h2>
     {% if snapshot %}
       <span class="badge cache" title="{{ snapshot.fetched_at }}">
-        network snapshot {{ snapshot.fetched_at | ago }} · {{ overview | length }} destinations
+        network snapshot {{ snapshot.fetched_at | ago }} ·
+        {{ overview | length }}{% if region %} of {{ total_dests }}{% endif %} destinations
       </span>
     {% endif %}
     <span class="watch-link"></span>
@@ -19,6 +20,7 @@
   <div class="actions">
     {% if homes | length > 1 %}
     <form method="get" action="/explore">
+      {% if region %}<input type="hidden" name="region" value="{{ region }}">{% endif %}
       <select name="origin" onchange="this.form.submit()">
         {% for h in homes %}<option value="{{ h }}" {{ 'selected' if h == origin }}>{{ h }}</option>{% endfor %}
       </select>
@@ -26,17 +28,30 @@
     </form>
     {% endif %}
     <form method="post" action="/refresh">
-      <input type="hidden" name="next" value="/explore?origin={{ origin }}">
+      <input type="hidden" name="next" value="/explore?origin={{ origin }}{% if region %}&region={{ region }}{% endif %}">
       <button class="btn-small btn-quiet">Refresh network snapshot</button>
     </form>
     <form method="post" action="/explore/sweep">
       <input type="hidden" name="origin" value="{{ origin }}">
+      <input type="hidden" name="region" value="{{ region or '' }}">
       <button class="btn-small">Refresh top leads now (≤{{ sweep_budget }} fetches)</button>
     </form>
     <span class="hint">Destinations are ranked by your interest × award availability from the
       free network snapshot. Round-trip leads cost one SAS request per destination — the nightly
-      sweep keeps the most interesting ones fresh.</span>
+      sweep keeps the most interesting ones fresh. Everything here is SAS-operated metal —
+      SkyTeam partner award space isn't in SAS's feed.</span>
   </div>
+
+  {% if regions %}
+  <nav class="region-filter" aria-label="Filter destinations by region">
+    <a class="region-chip {{ 'active' if not region }}" href="/explore?origin={{ origin }}">
+      All ({{ total_dests }})</a>
+    {% for r, n in regions %}
+    <a class="region-chip {{ 'active' if region == r }}"
+       href="/explore?origin={{ origin }}&region={{ r }}">{{ r | region_label }} ({{ n }})</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
 </section>
 
 {% if not snapshot %}
@@ -50,7 +65,7 @@
 {% set dest_leads = leads.get(o.code, []) %}
 <details class="dest {{ 'dest-muted' if o.interest == 0 }}">
   <summary>
-    <span class="dest-rank">{{ loop.index }}</span>
+    <span class="dest-rank" title="Overall rank across all regions">{{ ranks[o.code] }}</span>
     <span class="dest-name">
       <strong>{{ o.code }}</strong>
       {{ o.city_name or '' }}{% if o.country_name %}<span class="muted">, {{ o.country_name }}</span>{% endif %}
@@ -80,6 +95,7 @@
     <div class="actions">
       <form method="post" action="/explore/interest">
         <input type="hidden" name="origin" value="{{ origin }}">
+        <input type="hidden" name="region" value="{{ region or '' }}">
         <input type="hidden" name="destination" value="{{ o.code }}">
         <select name="interest">
           <option value="0" {{ 'selected' if o.interest == 0 }}>0 — skip</option>
@@ -91,6 +107,7 @@
       </form>
       <form method="post" action="/explore/refresh">
         <input type="hidden" name="origin" value="{{ origin }}">
+        <input type="hidden" name="region" value="{{ region or '' }}">
         <input type="hidden" name="destination" value="{{ o.code }}">
         <button class="btn-small">Refresh leads (1 fetch)</button>
       </form>
@@ -153,6 +170,13 @@
   </div>
 </details>
 {% endfor %}
+
+{% if region and not overview %}
+<section class="card">
+  <p class="muted">No destinations in {{ region | region_label }} from {{ origin }} in the current
+    network snapshot. <a href="/explore?origin={{ origin }}">Show all regions</a>.</p>
+</section>
+{% endif %}
 {% endif %}
 
 {% endblock %}

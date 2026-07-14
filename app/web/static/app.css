@@ -130,6 +130,14 @@ tr.watch-disabled td { opacity: .55; }
 .alert-body { font-size: .82rem; margin-top: .15rem; }
 
 /* ---- explore (Phase 3) ---- */
+.region-filter { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .7rem; }
+.region-chip {
+  font-size: .78rem; font-weight: 600; padding: .22rem .65rem; border-radius: 999px;
+  background: var(--cache-bg); color: var(--cache-ink); text-decoration: none;
+}
+.region-chip:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.region-chip.active { background: var(--accent); color: #fff; }
+
 details.dest {
   background: var(--card); border: 1px solid var(--line); border-radius: 12px;
   margin-bottom: .55rem; overflow: hidden;

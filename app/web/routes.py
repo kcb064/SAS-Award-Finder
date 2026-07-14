@@ -75,6 +75,7 @@ templates.env.filters["int"] = _fmt_int
 templates.env.filters["money"] = _fmt_money
 templates.env.filters["ago"] = _ago
 templates.env.filters["month_label"] = _month_label
+templates.env.filters["region_label"] = lambda r: (r or "").replace("_", " ").title()
 templates.env.globals["cabin_name"] = lambda c: CABIN_NAMES.get(c, c)
 
 
@@ -398,18 +399,34 @@ def _lead_view(lead: dict, city_name: str | None, stay: tuple[int, int], value=N
 
 
 @router.get("/explore")
-async def explore_page(request: Request, origin: str | None = Query(default=None)):
+async def explore_page(
+    request: Request,
+    origin: str | None = Query(default=None),
+    region: str | None = Query(default=None),
+):
     svc = _services(request)
     settings = svc.settings
     origin = (origin or settings.default_home).upper()
+    region = (region or "").strip().upper() or None
     q = request.query_params
 
     overview, snap = svc.explore.overview(origin)
+    # Ranks and region counts come from the FULL ranking, so a filtered view keeps the global
+    # rank numbers and every region chip stays visible for switching.
+    ranks = {o.code: i for i, o in enumerate(overview, start=1)}
+    region_counts: dict[str, int] = {}
+    for o in overview:
+        region_counts[o.region] = region_counts.get(o.region, 0) + 1
+    total_dests = len(overview)
+    if region:
+        overview = [o for o in overview if o.region == region]
+
     stay = (settings.explore_min_stay_days, settings.explore_max_stay_days)
     leads_raw = svc.explore.leads_for(origin)
     cities = {o.code: o.city_name for o in overview}
     countries = {o.code: o.country_name for o in overview}
     origin_country = svc.store.country_for(origin)
+    visible = {o.code for o in overview}
     leads = {
         dest: [
             _lead_view(
@@ -425,6 +442,7 @@ async def explore_page(request: Request, origin: str | None = Query(default=None
             for l in rows
         ]
         for dest, rows in leads_raw.items()
+        if dest in visible
     }
 
     return templates.TemplateResponse(
@@ -432,6 +450,10 @@ async def explore_page(request: Request, origin: str | None = Query(default=None
         {
             "request": request,
             "origin": origin,
+            "region": region,
+            "regions": sorted(region_counts.items()),
+            "total_dests": total_dests,
+            "ranks": ranks,
             "homes": settings.home_airports,
             "overview": overview,
             "snapshot": snap,
@@ -444,62 +466,77 @@ async def explore_page(request: Request, origin: str | None = Query(default=None
     )
 
 
+def _explore_url(origin: str, region: str = "") -> str:
+    """Base redirect target for Explore POSTs, keeping the active region filter."""
+    url = f"/explore?origin={origin}"
+    if region:
+        url += f"&region={quote(region)}"
+    return url
+
+
 @router.post("/explore/interest")
 async def set_interest(
     request: Request,
     origin: str = Form(...),
     destination: str = Form(...),
     interest: int = Form(...),
+    region: str = Form(default=""),
 ):
     svc = _services(request)
+    back = _explore_url(origin, region)
     try:
         svc.explore.set_interest(destination, interest)
     except ValueError as exc:
-        return RedirectResponse(
-            url=f"/explore?origin={origin}&err={quote(str(exc))}", status_code=303
-        )
+        return RedirectResponse(url=f"{back}&err={quote(str(exc))}", status_code=303)
     return RedirectResponse(
-        url=f"/explore?origin={origin}&ok={quote(f'{destination.upper()} interest set to {interest}')}",
+        url=f"{back}&ok={quote(f'{destination.upper()} interest set to {interest}')}",
         status_code=303,
     )
 
 
 @router.post("/explore/refresh")
 async def refresh_leads(
-    request: Request, origin: str = Form(...), destination: str = Form(...)
+    request: Request,
+    origin: str = Form(...),
+    destination: str = Form(...),
+    region: str = Form(default=""),
 ):
     """Fetch one route feed now and recompute its round-trip leads."""
     svc = _services(request)
+    back = _explore_url(origin, region)
     try:
         count, cached = await svc.explore_sweeper.refresh_destination(origin, destination)
     except BudgetExceeded as exc:
-        return RedirectResponse(url=f"/explore?origin={origin}&err={quote(str(exc))}", status_code=303)
+        return RedirectResponse(url=f"{back}&err={quote(str(exc))}", status_code=303)
     except FetchError as exc:
         msg = f"SAS blocked the fetch (Cloudflare): {exc}"
-        return RedirectResponse(url=f"/explore?origin={origin}&err={quote(msg)}", status_code=303)
+        return RedirectResponse(url=f"{back}&err={quote(msg)}", status_code=303)
     except Exception as exc:  # noqa: BLE001
         log.exception("explore refresh failed")
         return RedirectResponse(
-            url=f"/explore?origin={origin}&err={quote(f'Refresh failed: {exc}')}", status_code=303
+            url=f"{back}&err={quote(f'Refresh failed: {exc}')}", status_code=303
         )
     src = "from a fresh cached snapshot" if cached else "live"
     msg = (
         f"{destination.upper()}: {count} round-trip lead(s) {src}"
         if count else f"{destination.upper()}: no bookable round-trips within {svc.settings.explore_min_stay_days}–{svc.settings.explore_max_stay_days} day stays"
     )
-    return RedirectResponse(url=f"/explore?origin={origin}&ok={quote(msg)}", status_code=303)
+    return RedirectResponse(url=f"{back}&ok={quote(msg)}", status_code=303)
 
 
 @router.post("/explore/sweep")
-async def run_explore_sweep(request: Request, origin: str = Form(...)):
+async def run_explore_sweep(
+    request: Request, origin: str = Form(...), region: str = Form(default="")
+):
     """Run a budgeted sweep for one origin right now (same path the nightly job takes)."""
     svc = _services(request)
+    back = _explore_url(origin, region)
     try:
         summary = await svc.explore_sweeper.run_origin(origin)
     except Exception as exc:  # noqa: BLE001
         log.exception("manual explore sweep failed")
         return RedirectResponse(
-            url=f"/explore?origin={origin}&err={quote(f'Sweep failed: {exc}')}", status_code=303
+            url=f"{back}&err={quote(f'Sweep failed: {exc}')}", status_code=303
         )
     msg = (
         f"Swept {summary['fetched'] + summary['cached']} of {summary['queued']} queued routes "
@@ -507,7 +544,7 @@ async def run_explore_sweep(request: Request, origin: str = Form(...)):
         f"{summary['leads']} lead(s)"
         + (f", {summary['failed']} failed" if summary["failed"] else "")
     )
-    return RedirectResponse(url=f"/explore?origin={origin}&ok={quote(msg)}", status_code=303)
+    return RedirectResponse(url=f"{back}&ok={quote(msg)}", status_code=303)
 
 
 @router.get("/status")

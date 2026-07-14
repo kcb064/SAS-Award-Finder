@@ -70,6 +70,13 @@ immediately (1 fetch); *Refresh top leads now* runs the budgeted sweep on demand
 snapshot (e.g. you just searched the route) is reused instead of re-fetching — cached refreshes don't
 spend budget.
 
+A **region filter** (North America, Asia, Europe, …) narrows the list; the regions come from the
+zone table's country groups in [`config/points_table.yaml`](config/points_table.yaml), so a country
+missing from `zones:` falls into `default_zone` (Europe) until you add it there. Rank numbers stay
+global, so #14 filtered to Asia is still the #14 destination overall. Note that everything Explore
+shows is **SAS-operated metal** — SkyTeam partner award space isn't in SAS's award feed (it would
+only appear via the seats.aero provider).
+
 ## Points & taxes
 
 The feed has seat availability but **no prices** (SAS award flights are fixed-price). Points and taxes

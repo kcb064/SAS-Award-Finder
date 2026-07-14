@@ -173,6 +173,21 @@ def test_overview_ranks_by_interest_times_availability(explore_env):
     assert rows[1].score == 0
 
 
+def test_overview_resolves_region_from_zone_table(explore_env):
+    snapshots, store = explore_env
+    flights = (
+        network_flights("BOS", cabin="AB", days=3)
+        + network_flights("FCO", cabin="AG", days=3)
+        + network_flights("NRT", cabin="AG", days=3)
+    )
+    persist_network(snapshots, flights, DESTS.values())
+    rows, _ = store.overview("CPH")
+    # Region comes from the points-table zones (country -> zone), the Explore page's filter axis.
+    assert {r.code: r.region for r in rows} == {
+        "BOS": "NORTH_AMERICA", "FCO": "EUROPE", "NRT": "ASIA",
+    }
+
+
 def test_set_interest_rejects_out_of_range(explore_env):
     _, store = explore_env
     with pytest.raises(ValueError):

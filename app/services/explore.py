@@ -66,6 +66,7 @@ class DestinationOverview:
     code: str
     city_name: str | None
     country_name: str | None
+    region: str               # zone-table region (NORTH_AMERICA, ASIA, ...) — the Explore filter
     interest: int
     cabins: dict[str, CabinAvailability]
     first_date: str
@@ -272,6 +273,7 @@ class ExploreStore:
                 code=code,
                 city_name=info.get("city_name"),
                 country_name=info.get("country_name"),
+                region=self._zones.zone_for(code, info.get("country_name")),
                 interest=interest,
                 cabins=d["cabins"],
                 first_date=d["first"],
