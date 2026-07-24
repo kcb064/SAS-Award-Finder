@@ -257,3 +257,21 @@ The Phase 4 assumptions were checked against the real API. Outcomes:
 NL search (`app/services/nl_search.py`): one Claude Haiku forced-tool call parses the query into
 structured params; region expansion and filtering stay deterministic in `SkyTeamService`.
 Anthropic calls are not budget-tracked in `provider_calls`.
+
+### `/routes` — the SkyTeam region-expansion catalog (live-verified 2026-07-24)
+
+`GET /partnerapi/routes?source=flyingblue` returns a flat JSON array (no pagination) of
+`{ID, OriginAirport, OriginRegion, DestinationAirport, DestinationRegion, Distance, Source}` —
+4,212 routes / ~760 KB for flyingblue, 22 of them from CPH. Two properties make it the right
+catalog for region searches:
+
+1. The pairs are **exactly the markets `/search` can answer** for that source — expanding a
+   region into anything else burns budget on guaranteed-empty queries.
+2. It covers the partner network SAS never flies, which the SAS catalog can't provide.
+
+Caveat: `*Region` values are continents only (North America, South America, Europe, Asia,
+Africa, Oceania). Scandinavia hides inside "Europe" and the Middle East inside "Asia", so
+`SkyTeamService.expand_region` refines with `airport_zones` overrides and SAS-catalog country
+names where available, and falls back to the continent for airports nobody knows. The map is
+cached in memory per source for 24h (`ROUTES_TTL_S`); each fetch is one budgeted call recorded
+as scope `routes` with the source in the origin column.

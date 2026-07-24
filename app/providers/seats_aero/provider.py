@@ -140,6 +140,39 @@ class SeatsAeroProvider:
         )
         return entries
 
+    async def get_routes(self, source: str) -> list[dict]:
+        """Every origin→destination pair seats.aero indexes for `source` (the SkyTeam tab's
+        region-expansion catalog). One budgeted, rate-limited call; the response is a flat
+        array, not paginated. The audit row records the source in the origin column."""
+        self._budget.check()
+        http_status: int | None = None
+        byte_size = 0
+        duration_ms = 0
+        try:
+            async with self._rate:
+                t0 = time.perf_counter()
+                resp = await self._http().get(
+                    endpoints.ROUTES_PATH,
+                    params=endpoints.routes_params(source),
+                    headers=self._headers,
+                )
+                duration_ms = int((time.perf_counter() - t0) * 1000)
+            http_status = resp.status_code
+            byte_size = len(resp.content)
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception:
+            self._budget.record(ProviderCall(
+                "routes", source.upper(), None, "failed", http_status, byte_size, duration_ms,
+                provider=self.name,
+            ))
+            raise
+        self._budget.record(ProviderCall(
+            "routes", source.upper(), None, "ok", http_status, byte_size, duration_ms,
+            provider=self.name,
+        ))
+        return payload if isinstance(payload, list) else (payload.get("data") or [])
+
     async def fetch(
         self, scope: str, origin: str, destination: str | None = None
     ) -> ProviderFetch:

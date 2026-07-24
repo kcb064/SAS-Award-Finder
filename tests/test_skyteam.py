@@ -94,11 +94,22 @@ def test_f_cabin_never_surfaces(live_raw):
 # ---- SkyTeamService ------------------------------------------------------------------------
 
 
+def _route(origin: str, dest: str, region: str, source: str = "flyingblue") -> dict:
+    """A seats.aero /routes entry (live-verified shape, 2026-07-24)."""
+    return {
+        "ID": f"{origin}-{dest}-{source}", "OriginAirport": origin, "OriginRegion": "Europe",
+        "DestinationAirport": dest, "DestinationRegion": region, "Distance": 1, "Source": source,
+    }
+
+
 def _service(tmp_db, tmp_path, zones, pages: list[dict], daily_limit: int = 50,
+             routes: list[dict] | None = None, routes_status: int = 200,
              **svc_kwargs) -> tuple[SkyTeamService, list]:
-    seen: list[httpx.Request] = []
+    seen: list[httpx.Request] = []          # /search requests only (routes hits count via budget)
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/routes"):
+            return httpx.Response(routes_status, json=routes or [])
         seen.append(request)
         return httpx.Response(200, json=pages[min(len(seen) - 1, len(pages) - 1)])
 
@@ -155,9 +166,84 @@ async def test_region_expands_to_catalog_airports(tmp_db, tmp_path, zones):
     assert result.total == 2      # Y + J rows on the one date
 
 
+async def test_region_includes_partner_only_destinations_ranked_first(tmp_db, tmp_path, zones):
+    # SGN exists only in the route map (never in the SAS catalog): it must surface, and ranking
+    # is by cached-route count — SGN (2 routes) > BKK (1) > catalog-only NRT (0). Routes from
+    # unsearched origins and other regions never count.
+    routes = [
+        _route("CPH", "SGN", "Asia"),
+        _route("CPH", "SGN", "Asia", source="delta"),
+        _route("CPH", "BKK", "Asia"),
+        _route("OSL", "BKK", "Asia"),      # origin not searched
+        _route("CPH", "AMS", "Europe"),    # wrong region
+    ]
+    svc, seen = _service(tmp_db, tmp_path, zones, [_entries_for_dates(_future(10))],
+                         routes=routes, sources=("flyingblue",))
+    result = await svc.search(origins=["CPH"], region="ASIA")
+    assert result.destinations == ["SGN", "BKK", "NRT"]
+    assert seen[0].url.params["destination_airport"] == "SGN,BKK,NRT"
+
+
+async def test_region_refines_coarse_continents(tmp_db, tmp_path, zones):
+    # seats.aero only knows continents. ARN ("Europe") lands in SCANDINAVIA via the airport
+    # override; AUH refines to MIDDLE_EAST only once the SAS catalog knows its country —
+    # unknown airports stay on the coarse continent (Asia -> ASIA).
+    routes = [_route("CPH", "ARN", "Europe"), _route("CPH", "CDG", "Europe"),
+              _route("CPH", "AUH", "Asia")]
+    svc, _ = _service(tmp_db, tmp_path, zones, [_entries_for_dates(_future(10))],
+                      routes=routes, sources=("flyingblue",))
+    assert await svc.expand_region("SCANDINAVIA", ["CPH"]) == ["ARN"]
+    assert await svc.expand_region("EUROPE", ["CPH"]) == ["CDG"]
+    assert "AUH" in await svc.expand_region("ASIA", ["CPH"])
+    with pytest.raises(ValueError, match="no known airports"):
+        await svc.expand_region("MIDDLE_EAST", ["CPH"])
+    conn = db.connect(tmp_db)
+    try:
+        conn.execute(
+            "INSERT INTO airports (code, city_name, country_name, updated_at) VALUES (?,?,?,?)",
+            ("AUH", "Abu Dhabi", "United Arab Emirates", "x"),
+        )
+    finally:
+        conn.close()
+    assert await svc.expand_region("MIDDLE_EAST", ["CPH"]) == ["AUH"]
+    assert "AUH" not in await svc.expand_region("ASIA", ["CPH"])
+
+
+async def test_searched_origins_are_excluded_from_expansion(tmp_db, tmp_path, zones):
+    routes = [_route("CPH", "OSL", "Europe"), _route("CPH", "CDG", "Europe"),
+              _route("OSL", "CDG", "Europe")]
+    svc, _ = _service(tmp_db, tmp_path, zones, [_entries_for_dates(_future(10))],
+                      routes=routes, sources=("flyingblue",))
+    assert await svc.expand_region("EUROPE", ["CPH", "OSL"]) == ["CDG"]
+
+
+async def test_route_map_is_cached_across_searches(tmp_db, tmp_path, zones):
+    routes = [_route("CPH", "BKK", "Asia")]
+    svc, _ = _service(tmp_db, tmp_path, zones, [_entries_for_dates(_future(10))],
+                      routes=routes, sources=("flyingblue",))
+    await svc.search(origins=["CPH"], region="ASIA")
+    await svc.search(origins=["CPH"], region="ASIA")
+    # 2 searches + exactly 1 routes fetch: the map lives for ROUTES_TTL_S.
+    assert Budget(tmp_db, 50, provider="seats_aero").used() == 3
+
+
+async def test_routes_failure_falls_back_to_sas_catalog(tmp_db, tmp_path, zones):
+    svc, _ = _service(tmp_db, tmp_path, zones, [_entries_for_dates(_future(10))],
+                      routes_status=500, sources=("flyingblue",))
+    result = await svc.search(origins=["CPH"], region="ASIA")
+    assert result.destinations == ["BKK", "NRT"]
+
+
+async def test_empty_region_suggests_catalog_refresh(tmp_db, tmp_path, zones):
+    svc, _ = _service(tmp_db, tmp_path, zones, [_entries_for_dates(_future(10))],
+                      sources=("flyingblue",))
+    with pytest.raises(ValueError, match="refresh the network catalog"):
+        await svc.expand_region("OCEANIA", ["CPH"])
+
+
 async def test_unknown_region_raises_value_error(tmp_db, tmp_path, zones):
     svc, _ = _service(tmp_db, tmp_path, zones, [_entries_for_dates(_future(10))])
-    with pytest.raises(ValueError, match="refresh the network catalog"):
+    with pytest.raises(ValueError, match="unknown region"):
         await svc.search(origins=["CPH"], region="ATLANTIS")
 
 
@@ -277,3 +363,27 @@ async def test_search_entries_paginates_and_returns_raw(tmp_db, sa_raw):
     assert seen[0].url.params["destination_airport"] == "BKK,NRT"
     assert seen[1].url.params["cursor"] == "abc"
     assert Budget(tmp_db, 50, provider="seats_aero").used() == 2
+
+
+async def test_get_routes_spends_budget_and_audits_the_source(tmp_db):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/routes")
+        assert request.url.params["source"] == "flyingblue"
+        return httpx.Response(200, json=[_route("CPH", "SGN", "Asia")])
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://seats.aero/partnerapi",
+    )
+    provider = SeatsAeroProvider(
+        "k", RateLimiter(0, 0), Budget(tmp_db, 50, provider="seats_aero"), client=client,
+    )
+    routes = await provider.get_routes("flyingblue")
+    assert routes[0]["DestinationAirport"] == "SGN"
+    conn = db.connect(tmp_db)
+    try:
+        row = conn.execute(
+            "SELECT scope, origin, destination, status FROM provider_calls"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert tuple(row) == ("routes", "FLYINGBLUE", None, "ok")

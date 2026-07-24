@@ -89,6 +89,11 @@ class ZoneTable:
                 return zone
         return self._default_zone
 
+    def airport_override(self, airport_code: str) -> str | None:
+        """The explicit airport_zones entry, or None — unlike zone_for, never falls back to the
+        default zone, so callers with their own airport knowledge can tell 'known' from 'guessed'."""
+        return self._airport_zones.get(airport_code.upper())
+
     # ---- pricing ---------------------------------------------------------------------
 
     def _points_for(self, zone_a: str, zone_b: str, cabin: str) -> int:

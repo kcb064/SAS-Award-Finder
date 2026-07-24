@@ -45,13 +45,16 @@ zones:
   OCEANIA: [Australia, "New Zealand"]
   SOUTH_AMERICA: [Brazil, Argentina, Chile, Peru, Colombia]
 
-# Explicit IATA -> zone overrides (e.g. home airports, edge cases).
+# Explicit IATA -> zone overrides (e.g. home airports, edge cases). Also used to refine the
+# seats.aero route map's continent-only regions when the SAS catalog doesn't know an airport.
 airport_zones:
   CPH: SCANDINAVIA
   ARN: SCANDINAVIA
   OSL: SCANDINAVIA
   GOT: SCANDINAVIA
   STO: SCANDINAVIA
+  BLL: SCANDINAVIA
+  AAL: SCANDINAVIA
 
 # Fallback zone when a country isn't listed above.
 default_zone: EUROPE

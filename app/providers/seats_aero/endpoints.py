@@ -18,6 +18,14 @@ from __future__ import annotations
 BASE_URL = "https://seats.aero/partnerapi"
 SEARCH_PATH = "/search"
 
+# Route map for one source. LIVE-VERIFIED 2026-07-24: returns a flat JSON array of
+# {ID, OriginAirport, OriginRegion, DestinationAirport, DestinationRegion, Distance, Source}
+# (~4200 routes / ~760 KB for flyingblue). These pairs are EXACTLY the markets /search can
+# answer for that source — destinations outside the map always come back empty. Region
+# vocabulary is continents only (North America, South America, Europe, Asia, Africa, Oceania):
+# Scandinavia hides inside "Europe" and the Middle East inside "Asia".
+ROUTES_PATH = "/routes"
+
 # seats.aero mileage-program identifier for SAS EuroBonus. LIVE-VERIFIED 2026-07-24: this source
 # does NOT exist on seats.aero — no entry ever carries it, so the AF_PROVIDER=seats_aero fallback
 # yields empty feeds. Kept for the legacy parse path; see docs/api-notes.md Phase 5.
@@ -26,6 +34,11 @@ SOURCE_EUROBONUS = "eurobonus"
 # SkyTeam programs seats.aero actually indexes (live-verified). Their availability is the shared
 # SkyTeam partner space EuroBonus can book too — but the mileage prices are THEIRS, not EuroBonus.
 SKYTEAM_SOURCES = ("flyingblue", "delta", "virginatlantic")
+
+
+def routes_params(source: str) -> dict[str, str]:
+    """The route-map query for one mileage program (see ROUTES_PATH)."""
+    return {"source": source}
 
 
 def _base_params(*, start_date: str, end_date: str, take: int, cursor: str | None) -> dict[str, str]:

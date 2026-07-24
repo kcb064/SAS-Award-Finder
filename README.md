@@ -132,8 +132,12 @@ partner space EuroBonus can book (on flysas.com or by phone), but the mileage/ta
 **that program's prices, not EuroBonus's**. SAS-operated rows with 2+ confirmed seats get a
 *voucher-usable leg* badge — a real 2-for-1 still needs an SK round trip with 2+ seats on both
 legs. A destination list or region is required (the API returns nothing for origin-only
-searches); regions expand via the SAS catalog, so refresh the network catalog first on a fresh
-install.
+searches). Regions expand against the union of the **seats.aero route map** (one cached call per
+source per day — the partner network reaches far beyond SAS's own, and those pairs are exactly
+what seats.aero can answer for) and the **SAS network catalog** (which also refines seats.aero's
+coarse continents into Scandinavia / Middle East via country names — keep the catalog refreshed
+for best results). Expansion is capped at 30 airports, ranked by how many cached routes serve
+each one.
 
 Set `AF_ANTHROPIC_API_KEY` to add a **plain-language search box** on that tab: *"find me flights
 to Asia in October that I can use my 2-for-1 vouchers on"* becomes a structured search (one cheap
