@@ -215,3 +215,45 @@ authored, not recorded). When a key arrives, verify these assumptions; any misma
 Mapping decisions (ours, not the API's): Y→AG, W→AP, J→AB, F skipped; `RemainingSeats == 0` while
 available ⇒ recorded as 1 seat ("at least one"); `is_sas_operated` only when the airline list is
 exactly `SK` — so 2-for-1 voucher logic can never fire on partner metal or unknown carriers.
+
+---
+
+## Phase 5 notes (2026-07-24): SkyTeam tab (LIVE-VERIFIED seats.aero) + NL search
+
+The SkyTeam tab (`/skyteam`) runs a SECOND seats.aero provider instance ALONGSIDE sas_direct
+(needs only `AF_SEATS_AERO_API_KEY`, not `AF_PROVIDER`), with its own provider-scoped daily
+budget (`AF_SEATS_AERO_DAILY_BUDGET`). Results are **live-only**: fetched via
+`SeatsAeroProvider.search_entries()` → `parse_partner_rows()` and rendered, never persisted —
+seats.aero itself is the cache.
+
+### Live verification results (first real key, 2026-07-24)
+
+The Phase 4 assumptions were checked against the real API. Outcomes:
+
+1. **WRONG — origin-only search returns nothing.** `origin_airport` without
+   `destination_airport` → HTTP 200 with an empty `data` array. The tab therefore REQUIRES
+   destinations (a region expands to a ≤30-code list; `SkyTeamService` rejects empty
+   destination sets before spending budget). This also means the legacy fallback provider's
+   NETWORK scope (`AF_PROVIDER=seats_aero`) silently returns empty catalogs.
+2. **OK** — comma lists work on both sides (`origin_airport=CPH,OSL&destination_airport=BKK,NRT`
+   returned all combinations).
+3. Pagination shape (`hasMore`/`cursor`) present as expected (large responses not yet observed
+   paginating; `hasMore` was false up to 280 entries).
+4. **Field names OK, but no `eurobonus` source exists.** seats.aero does NOT index SAS
+   EuroBonus at all. CPH–BKK returned sources: flyingblue, delta, virginatlantic, united,
+   aeroplan, etihad. **Consequence: the `AF_PROVIDER=seats_aero` fallback can never return
+   EuroBonus-priced data** — its parse path filters `Source == "eurobonus"` and will always be
+   empty. The SkyTeam tab instead reads SkyTeam programs (`AF_SKYTEAM_SOURCES`, default
+   `flyingblue`) — their availability is the shared SkyTeam partner space EuroBonus can also
+   book, but the **mileage prices are that program's, not EuroBonus's** (the UI says so).
+5. **OK** — `Partner-Authorization` header authenticates.
+6. Per-cabin fields (recorded in `tests/fixtures/seats_aero_search_live_cph_bkk.json`, a real
+   trimmed response): `{L}MileageCost` is a **string**, `"0"` means "no figure" (parsed to
+   None); `{L}TotalTaxes` is an int in **minor currency units** of `TaxesCurrency` (48100 USD
+   = $481.00, 394500 DKK = 3 945 kr — parser divides by 100); `{L}Direct` is a bool. Every
+   field also has a `...Raw` twin — the plain fields are seats.aero's "reasonably priced"
+   filtered view and are the ones we read.
+
+NL search (`app/services/nl_search.py`): one Claude Haiku forced-tool call parses the query into
+structured params; region expansion and filtering stay deterministic in `SkyTeamService`.
+Anthropic calls are not budget-tracked in `provider_calls`.

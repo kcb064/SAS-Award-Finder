@@ -72,25 +72,11 @@ class SeatsAeroProvider:
             await self._client.aclose()
             self._client = None
 
-    async def fetch(
-        self, scope: str, origin: str, destination: str | None = None
-    ) -> ProviderFetch:
-        origin = origin.upper()
-        start = date.today().isoformat()
-        end = (date.today() + timedelta(days=HORIZON_DAYS)).isoformat()
-        if scope == SCOPE_NETWORK:
-            dest = None
-            params = endpoints.network_params(
-                origin, start_date=start, end_date=end, take=self._page_size)
-        elif scope == SCOPE_ROUTE:
-            if not destination:
-                raise ValueError("route scope requires a destination")
-            dest = destination.upper()
-            params = endpoints.route_params(
-                origin, dest, start_date=start, end_date=end, take=self._page_size)
-        else:
-            raise ValueError(f"unknown scope: {scope!r}")
-
+    async def _paged_search(
+        self, params: dict, *, scope: str, origin: str, dest: str | None
+    ) -> tuple[list[dict], int | None, int, int]:
+        """Run one cursor-paginated cached search: every page is rate-limited, budget-checked,
+        and recorded to `provider_calls`. Returns (entries, last_http_status, bytes, ms)."""
         entries: list[dict] = []
         http_status: int | None = None
         byte_size = 0
@@ -126,7 +112,56 @@ class SeatsAeroProvider:
             cursor = payload.get("cursor")
             if not payload.get("hasMore") or not cursor:
                 break
+        return entries, http_status, byte_size, duration_ms
 
+    async def search_entries(
+        self,
+        origins: list[str],
+        destinations: list[str] | None,
+        *,
+        start_date: str,
+        end_date: str,
+    ) -> list[dict]:
+        """Raw cached-search entries for arbitrary airport lists (the SkyTeam tab's live path).
+
+        Returns unparsed API entries — the caller picks the parse (parse_partner_rows keeps
+        partner metal and per-cabin mileage costs that ParsedFeed has no room for). The audit
+        row's origin/destination columns are comma lists truncated to stay readable.
+        """
+        params = endpoints.search_params(
+            origins, destinations,
+            start_date=start_date, end_date=end_date, take=self._page_size,
+        )
+        entries, _, _, _ = await self._paged_search(
+            params,
+            scope=SCOPE_ROUTE,
+            origin=",".join(origins)[:40],
+            dest=",".join(destinations)[:40] if destinations else None,
+        )
+        return entries
+
+    async def fetch(
+        self, scope: str, origin: str, destination: str | None = None
+    ) -> ProviderFetch:
+        origin = origin.upper()
+        start = date.today().isoformat()
+        end = (date.today() + timedelta(days=HORIZON_DAYS)).isoformat()
+        if scope == SCOPE_NETWORK:
+            dest = None
+            params = endpoints.network_params(
+                origin, start_date=start, end_date=end, take=self._page_size)
+        elif scope == SCOPE_ROUTE:
+            if not destination:
+                raise ValueError("route scope requires a destination")
+            dest = destination.upper()
+            params = endpoints.route_params(
+                origin, dest, start_date=start, end_date=end, take=self._page_size)
+        else:
+            raise ValueError(f"unknown scope: {scope!r}")
+
+        entries, http_status, byte_size, duration_ms = await self._paged_search(
+            params, scope=scope, origin=origin, dest=dest,
+        )
         feed = parse_search({"data": entries}, origin, dest, source=self._source)
         return ProviderFetch(
             scope=scope,

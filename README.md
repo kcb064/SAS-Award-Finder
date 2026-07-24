@@ -114,8 +114,30 @@ Search, watches, Explore, and alerts all keep working unchanged — the provider
 two feed scopes (route = both directions in one call via comma lists; network = outbound sweep), the
 same rate-limit/budget layer, and maps seats.aero cabins (Y/W/J) onto AG/AP/AB. `is_sas_operated`
 is only set when a cabin's airline list is exactly SK, so voucher logic never fires on partner metal.
-**Note:** written against the published API docs but not yet exercised against a live key — expect to
-touch only `app/providers/seats_aero/{endpoints,parser}.py` if a field is off.
+**Live-verified warning (2026-07-24):** seats.aero turned out to have **no `eurobonus` source**, so
+this fallback returns empty EuroBonus feeds and origin-only (network-scope) searches return nothing.
+Keep `AF_PROVIDER=sas_direct`; for partner coverage use the SkyTeam tab below. Details in
+[docs/api-notes.md](docs/api-notes.md).
+
+## SkyTeam discovery + natural-language search (Phase 5)
+
+The **SkyTeam** tab searches seats.aero for SkyTeam / partner award space — the partner metal
+SAS's own award feed never shows. It runs **alongside** the SAS scraper (just set
+`AF_SEATS_AERO_API_KEY`; `AF_PROVIDER` stays `sas_direct`), with its own daily budget
+(`AF_SEATS_AERO_DAILY_BUDGET`) and results fetched live, never persisted.
+
+**Live-verified caveat:** seats.aero has no EuroBonus source, so availability comes from SkyTeam
+programs' caches (`AF_SKYTEAM_SOURCES`, default `flyingblue`). That's the same shared SkyTeam
+partner space EuroBonus can book (on flysas.com or by phone), but the mileage/taxes shown are
+**that program's prices, not EuroBonus's**. SAS-operated rows with 2+ confirmed seats get a
+*voucher-usable leg* badge — a real 2-for-1 still needs an SK round trip with 2+ seats on both
+legs. A destination list or region is required (the API returns nothing for origin-only
+searches); regions expand via the SAS catalog, so refresh the network catalog first on a fresh
+install.
+
+Set `AF_ANTHROPIC_API_KEY` to add a **plain-language search box** on that tab: *"find me flights
+to Asia in October that I can use my 2-for-1 vouchers on"* becomes a structured search (one cheap
+Claude Haiku call per query; the box hides when the key is empty).
 
 ## Housekeeping
 

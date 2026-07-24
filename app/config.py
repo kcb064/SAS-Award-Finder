@@ -36,6 +36,23 @@ class Settings(BaseSettings):
     seats_aero_api_key: str = ""
     seats_aero_source: str = "eurobonus"
 
+    # SkyTeam tab (Phase 5): a second seats.aero instance running ALONGSIDE sas_direct, with its
+    # own daily cap and (much faster) pacing — it's a real API, not a scraped site.
+    # Which seats.aero programs to show (comma-separated). seats.aero has NO eurobonus source;
+    # SkyTeam partner space surfaces via these programs' caches (flyingblue is the broadest —
+    # add delta,virginatlantic for more coverage at the cost of near-duplicate rows).
+    skyteam_sources: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["flyingblue"]
+    )
+    seats_aero_daily_budget: int = 400
+    seats_aero_min_interval_s: float = 0.5
+    seats_aero_max_interval_s: float = 1.5
+    skyteam_default_horizon_days: int = 60   # date window when the form has no dates
+
+    # Natural-language search (Anthropic). Empty key hides the NL box entirely.
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-haiku-4-5-20251001"
+
     # Fetching
     headless: bool = True
     browser_channel: str = "chrome"
@@ -69,7 +86,7 @@ class Settings(BaseSettings):
     # Scheduler
     scheduler_enabled: bool = True
 
-    @field_validator("home_airports", "notify_urls", mode="before")
+    @field_validator("home_airports", "notify_urls", "skyteam_sources", mode="before")
     @classmethod
     def _split_csv(cls, v: object) -> object:
         """Accept a comma-separated string from env and turn it into a clean list."""

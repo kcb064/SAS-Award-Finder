@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}SkyTeam · EuroBonus Award Finder{% endblock %}
+{% block content %}
+
+{% if setup_notice %}
+<section class="card">
+  <h2>SkyTeam discovery</h2>
+  <p>This tab searches <strong>seats.aero</strong> for SkyTeam / partner award space bookable
+  with your EuroBonus points — including non-SAS metal the SAS award finder never shows.</p>
+  <p class="muted">Set <code>AF_SEATS_AERO_API_KEY</code> (seats.aero Pro subscription) in your
+  <code>.env</code> and restart to enable it.</p>
+</section>
+{% else %}
+
+{% if nl_enabled %}
+<form class="card nl-form" method="get" action="/skyteam">
+  <h2>Ask in plain language</h2>
+  <div class="nl-row">
+    <input type="text" name="q" value="{{ form.q }}" autocomplete="off"
+           placeholder="e.g. find me flights to Asia in October that I can use my 2-for-1 vouchers on">
+    <button type="submit">Ask</button>
+  </div>
+  <span class="hint">One Claude Haiku call turns this into the form below — nothing is booked,
+  it only searches.</span>
+</form>
+{% endif %}
+
+{% if interpreted %}
+<div class="flash ok">Interpreted as: {{ interpreted }}</div>
+{% endif %}
+
+<form class="card search-form" method="get" action="/skyteam">
+  <div class="grid">
+    <label>Origin(s)
+      <input list="homes" name="origin" value="{{ form.origin }}" placeholder="{{ homes | join(',') }}">
+      <datalist id="homes">
+        {% for h in homes %}<option value="{{ h }}">{% endfor %}
+      </datalist>
+    </label>
+
+    <label>Destination(s)
+      <input list="dests" name="destination" value="{{ form.destination }}"
+             placeholder="CSV ok — or pick a region">
+      <datalist id="dests">
+        {% for d in destinations %}<option value="{{ d.code }}">{{ d.code }} — {{ d.city_name or d.code }}</option>{% endfor %}
+      </datalist>
+    </label>
+
+    <label>Region
+      <select name="region">
+        <option value="">Any region</option>
+        {% for r in regions %}
+          <option value="{{ r }}" {{ 'selected' if form.region == r }}>{{ r | region_label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Cabin
+      <select name="cabin">
+        {% for val, name in cabins %}
+          <option value="{{ val }}" {{ 'selected' if form.cabin == val }}>{{ name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <div class="grid">
+    <label>From
+      <input type="date" name="date_from" value="{{ form.date_from }}" min="{{ today }}">
+    </label>
+    <label>To
+      <input type="date" name="date_to" value="{{ form.date_to }}" min="{{ today }}">
+    </label>
+    <label>Min seats / cabin
+      <input type="number" name="min_seats" value="{{ form.min_seats }}" min="1" max="9">
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="direct" value="1" {{ 'checked' if form.direct }}>
+      Direct only
+    </label>
+  </div>
+
+  <div class="grid">
+    <label class="checkbox">
+      <input type="checkbox" name="voucher" value="1" {{ 'checked' if form.voucher }}>
+      SAS-operated with 2+ seats (voucher-usable)
+    </label>
+  </div>
+
+  <input type="hidden" name="submitted" value="1">
+  <div class="actions">
+    <button type="submit">Search SkyTeam space</button>
+    <span class="hint">Live from seats.aero (cached availability, not persisted) — destinations
+    or a region required. Partner metal is bookable with EuroBonus points but never 2-for-1
+    voucher eligible.</span>
+  </div>
+</form>
+
+{% if error %}
+  <div class="flash err">{{ error }}</div>
+{% endif %}
+
+{% if result is not none %}
+<section class="card">
+  <div class="results-head">
+    <h2>{{ result.total }} availability row{{ '' if result.total == 1 else 's' }}</h2>
+    <span class="badge live">{{ result.date_from }} → {{ result.date_to }}</span>
+    {% if result.region %}<span class="badge">{{ result.region | region_label }}</span>{% endif %}
+  </div>
+  {% if result.truncated %}
+  <div class="flash err">Showing the first {{ result.rows | length }} of {{ result.total }} rows —
+    narrow the dates, region, or cabin.</div>
+  {% endif %}
+
+  {% if result.rows %}
+  {% set has_taxes = result.rows | selectattr('total_taxes') | list %}
+  {% set many_sources = result.rows | map(attribute='source') | unique | list | length > 1 %}
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th><th>Route</th><th>Cabin</th><th>Airlines</th><th>Seats</th>
+          <th>Miles</th>{% if has_taxes %}<th>Taxes</th>{% endif %}
+          {% if many_sources %}<th>Program</th>{% endif %}<th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in result.rows %}
+        <tr>
+          <td>{{ r.date }}</td>
+          <td>{{ r.origin }} → {{ r.destination }}</td>
+          <td class="cabin cabin-{{ r.cabin }}">{{ cabin_name(r.cabin) }}</td>
+          <td>{{ r.airlines | join(', ') or '—' }}</td>
+          <td>{{ r.seats if r.seats > 0 else '1+' }}</td>
+          <td>{{ r.mileage_cost | int if r.mileage_cost is not none else '—' }}</td>
+          {% if has_taxes %}
+          <td>{% if r.total_taxes is not none %}{{ '{:,.0f}'.format(r.total_taxes) }} {{ r.taxes_currency or '' }}{% else %}—{% endif %}</td>
+          {% endif %}
+          {% if many_sources %}<td>{{ r.source }}</td>{% endif %}
+          <td>
+            {% if r.sas_operated and r.seats >= 2 %}
+              <span class="badge voucher">voucher-usable leg</span>
+            {% elif not r.sas_operated %}
+              <span class="badge">Partner</span>
+            {% endif %}
+            {% if r.direct %}<span class="badge live">Direct</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">Miles &amp; taxes are the <strong>{{ result.rows | map(attribute='source') | unique | join(' / ') }}</strong>
+  program's own pricing — EuroBonus prices this partner space differently (check flysas.com or call
+  SAS to book with your points). A 2-for-1 voucher needs a <strong>SAS-operated round trip with 2+
+  seats in the cabin on both legs</strong> — these are one-way availability rows, so pair outbound
+  and return dates yourself, or verify the pair on the <a href="/search">Search</a> tab.</p>
+  {% else %}
+  <p class="muted">No availability matched. Try a wider date window, another cabin, or drop the
+  voucher filter.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% endif %}
+{% endblock %}

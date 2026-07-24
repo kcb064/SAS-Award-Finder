@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
+import httpx
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -202,6 +203,130 @@ async def search(
             context["error"] = f"Search failed: {exc}"
 
     return templates.TemplateResponse("index.html", context)
+
+
+# ---- SkyTeam discovery (Phase 5) -----------------------------------------------------
+
+
+@router.get("/skyteam")
+async def skyteam_page(
+    request: Request,
+    q: str = Query(default=""),
+    origin: str = Query(default=""),
+    destination: str = Query(default=""),
+    region: str = Query(default=""),
+    date_from: str = Query(default=""),
+    date_to: str = Query(default=""),
+    cabin: str = Query(default=""),
+    min_seats: int = Query(default=1),
+    voucher: int = Query(default=0),
+    direct: int = Query(default=0),
+    submitted: int = Query(default=0),
+):
+    svc = _services(request)
+    settings = svc.settings
+
+    form = {
+        "q": q.strip(),
+        "origin": origin.strip().upper(),
+        "destination": destination.strip().upper(),
+        "region": region.strip().upper(),
+        "date_from": date_from,
+        "date_to": date_to,
+        "cabin": cabin,
+        "min_seats": min_seats,
+        "voucher": voucher,
+        "direct": direct,
+    }
+    context = {
+        "request": request,
+        "form": form,
+        "homes": settings.home_airports,
+        "destinations": svc.store.list_destinations(),
+        "cabins": CABIN_CHOICES,
+        "regions": svc.skyteam.region_names() if svc.skyteam else [],
+        "nl_enabled": svc.nl is not None,
+        "setup_notice": svc.skyteam is None,
+        "result": None,
+        "error": None,
+        "interpreted": None,
+        "voucher_note": False,
+        "today": date.today().isoformat(),
+    }
+    if svc.skyteam is None:
+        return templates.TemplateResponse("skyteam.html", context)
+
+    run_search = bool(submitted or form["destination"] or form["region"])
+
+    if form["q"]:
+        if svc.nl is None:
+            context["error"] = (
+                "Natural-language search needs AF_ANTHROPIC_API_KEY — use the form instead."
+            )
+        else:
+            from app.services.nl_search import NLParseError
+
+            try:
+                params = await svc.nl.parse(form["q"])
+            except NLParseError as exc:
+                context["error"] = str(exc)
+            else:
+                form.update({
+                    "origin": ",".join(params.origins),
+                    "destination": ",".join(params.destinations),
+                    "region": params.region or "",
+                    "date_from": params.date_from or "",
+                    "date_to": params.date_to or "",
+                    "cabin": params.cabin or "",
+                    "min_seats": params.min_seats or 1,
+                    "voucher": 1 if params.voucher_intent else 0,
+                })
+                context["interpreted"] = params.summary
+                context["voucher_note"] = params.voucher_intent
+                run_search = True
+
+    if run_search and not context["error"]:
+        origins = [o for o in form["origin"].split(",") if o.strip()] or settings.home_airports
+        dests = [d.strip() for d in form["destination"].split(",") if d.strip()] or None
+        min_s = int(form["min_seats"] or 1)
+        if form["voucher"]:
+            # Voucher hunting: only SAS-operated legs with 2+ CONFIRMED seats can carry a 2-for-1.
+            min_s = max(2, min_s)
+        try:
+            context["result"] = await svc.skyteam.search(
+                origins=origins,
+                destinations=dests,
+                region=form["region"] or None,
+                date_from=form["date_from"] or None,
+                date_to=form["date_to"] or None,
+                cabin=form["cabin"] or None,
+                min_seats=min_s,
+                sas_only=bool(form["voucher"]),
+                direct_only=bool(form["direct"]),
+            )
+        except BudgetExceeded as exc:
+            context["error"] = (
+                f"Daily seats.aero budget reached — {exc}. Raise AF_SEATS_AERO_DAILY_BUDGET "
+                "or try again tomorrow."
+            )
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code
+            if code in (401, 403):
+                context["error"] = (
+                    "seats.aero rejected the API key — check AF_SEATS_AERO_API_KEY and that the "
+                    "Pro subscription is active."
+                )
+            elif code == 429:
+                context["error"] = "seats.aero rate limit hit — wait a minute and retry."
+            else:
+                context["error"] = f"seats.aero returned HTTP {code}."
+        except ValueError as exc:
+            context["error"] = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("skyteam search failed")
+            context["error"] = f"Search failed: {exc}"
+
+    return templates.TemplateResponse("skyteam.html", context)
 
 
 # ---- watches (Phase 2) ---------------------------------------------------------------
@@ -601,6 +726,11 @@ async def status(request: Request):
     finally:
         conn.close()
 
+    sa_budget = None
+    if svc.skyteam is not None:
+        sa_budget = Budget(
+            svc.settings.db_path, svc.settings.seats_aero_daily_budget, provider="seats_aero",
+        )
     return templates.TemplateResponse(
         "status.html",
         {
@@ -610,6 +740,8 @@ async def status(request: Request):
             "budget_used": budget.used(),
             "budget_remaining": budget.remaining(),
             "budget_limit": svc.settings.daily_request_budget,
+            "sa_budget_used": sa_budget.used() if sa_budget else None,
+            "sa_budget_limit": svc.settings.seats_aero_daily_budget if sa_budget else None,
             "fetcher_started": svc.fetcher.started,
             "homes": svc.settings.home_airports,
         },

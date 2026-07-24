@@ -19,11 +19,12 @@ Mapping decisions:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from app.models import AwardFlight, DestinationInfo, ParsedFeed
 from app.providers.base import FeedParseError
-from app.providers.seats_aero.endpoints import SOURCE_EUROBONUS
+from app.providers.seats_aero.endpoints import SKYTEAM_SOURCES, SOURCE_EUROBONUS
 
 # seats.aero fare-class letter -> SAS cabin code.
 CABIN_MAP = {"Y": "AG", "W": "AP", "J": "AB"}
@@ -114,3 +115,95 @@ def parse_search(
     # names an earlier SAS catalog already filled in.
     destinations = [DestinationInfo(code=c) for c in dest_codes if c != origin]
     return ParsedFeed(destinations=destinations, flights=flights)
+
+
+# ---- SkyTeam tab (display-only, never persisted) --------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class SkyTeamRow:
+    """One date+cabin availability row for the SkyTeam tab.
+
+    Unlike AwardFlight, this keeps partner airlines, the source program's own mileage cost, and
+    the direct flag — and `seats` stays 0 when the count is unknown (the UI shows "1+"),
+    because the voucher-usable badge must only fire on >=2 CONFIRMED seats.
+
+    LIVE-VERIFIED field semantics (2026-07-24): `{L}MileageCost` is a string, "0" == no figure;
+    `{L}TotalTaxes` is an int in MINOR units of TaxesCurrency (USD cents, DKK øre) — converted
+    to major units here; the non-Raw fields are seats.aero's "reasonably priced" view (the Raw
+    variants include dynamic pricing) and are the ones we read.
+    """
+
+    date: str
+    origin: str
+    destination: str
+    cabin: str                      # AG/AP/AB via CABIN_MAP
+    airlines: tuple[str, ...]       # e.g. ("AF", "KL", "SK")
+    seats: int                      # RemainingSeats; 0 == count unknown ("at least 1")
+    sas_operated: bool
+    direct: bool | None             # None when the API omits the flag
+    mileage_cost: int | None        # in the SOURCE program's miles, not EuroBonus points
+    total_taxes: float | None       # major currency units
+    taxes_currency: str | None
+    source: str                     # mileage program the row came from ("flyingblue", ...)
+
+
+def _mileage(value: Any) -> int | None:
+    try:
+        cost = int(value)
+    except (TypeError, ValueError):
+        return None
+    return cost or None             # "0" means "no figure", not free
+
+def _taxes(value: Any) -> float | None:
+    try:
+        minor = float(value)
+    except (TypeError, ValueError):
+        return None
+    return minor / 100.0 if minor > 0 else None
+
+
+def parse_partner_rows(
+    raw: Any, *, sources: tuple[str, ...] = SKYTEAM_SOURCES
+) -> list[SkyTeamRow]:
+    """Cached-search entries -> display rows, keeping ALL airlines (partner metal included).
+
+    No origin/destination filtering — the request already scoped the search. Entries from
+    programs outside `sources` are dropped; each kept row records which program priced it.
+    """
+    allowed = {s.lower() for s in sources}
+    rows: list[SkyTeamRow] = []
+    for entry in _coerce(raw):
+        route = entry.get("Route")
+        if not isinstance(route, dict):
+            raise FeedParseError("seats.aero entry missing 'Route'")
+        source = (route.get("Source") or "").lower()
+        if source not in allowed:
+            continue
+        origin = str(route.get("OriginAirport") or "").upper()
+        dest = str(route.get("DestinationAirport") or "").upper()
+        date = entry.get("Date")
+        if not origin or not dest:
+            raise FeedParseError("seats.aero Route missing airport codes")
+        if not date:
+            raise FeedParseError("seats.aero entry missing 'Date'")
+        for letter, cabin in CABIN_MAP.items():
+            if not entry.get(f"{letter}Available"):
+                continue
+            airlines_raw = entry.get(f"{letter}Airlines")
+            airlines = tuple(
+                t.strip().upper() for t in (airlines_raw or "").split(",") if t.strip()
+            )
+            direct = entry.get(f"{letter}Direct")
+            rows.append(SkyTeamRow(
+                date=date, origin=origin, destination=dest, cabin=cabin,
+                airlines=airlines,
+                seats=int(entry.get(f"{letter}RemainingSeats") or 0),
+                sas_operated=_sas_operated(airlines_raw),
+                direct=bool(direct) if direct is not None else None,
+                mileage_cost=_mileage(entry.get(f"{letter}MileageCost")),
+                total_taxes=_taxes(entry.get(f"{letter}TotalTaxes")),
+                taxes_currency=(entry.get("TaxesCurrency") or None),
+                source=source,
+            ))
+    return rows

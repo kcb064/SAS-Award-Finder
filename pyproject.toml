@@ -16,6 +16,7 @@ dependencies = [
     "tenacity>=9.0,<10",
     "pyyaml>=6.0,<7",
     "httpx>=0.28,<0.29",    # seats.aero fallback provider (also used by tests)
+    "anthropic>=0.40,<1",   # natural-language search on the SkyTeam tab
 ]
 
 [project.optional-dependencies]

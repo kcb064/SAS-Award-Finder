@@ -7,6 +7,9 @@
   <div class="stat-row">
     <div class="stat"><span class="stat-num">{{ budget_used }}</span><span class="stat-label">SAS requests today</span></div>
     <div class="stat"><span class="stat-num">{{ budget_remaining }}</span><span class="stat-label">budget remaining (of {{ budget_limit }})</span></div>
+    {% if sa_budget_used is not none %}
+    <div class="stat"><span class="stat-num">{{ sa_budget_used }}</span><span class="stat-label">seats.aero requests today (of {{ sa_budget_limit }})</span></div>
+    {% endif %}
     <div class="stat"><span class="stat-num">{{ 'yes' if fetcher_started else 'no' }}</span><span class="stat-label">browser session warm</span></div>
     <div class="stat"><span class="stat-num">{{ homes | join(', ') }}</span><span class="stat-label">home airports</span></div>
   </div>

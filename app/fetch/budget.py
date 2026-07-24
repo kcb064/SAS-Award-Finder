@@ -34,17 +34,23 @@ def _today() -> str:
 
 
 class Budget:
-    def __init__(self, db_path: Path, daily_limit: int) -> None:
+    def __init__(self, db_path: Path, daily_limit: int, *, provider: str | None = None) -> None:
         self.db_path = db_path
         self.daily_limit = daily_limit
+        # None counts ALL calls (the original SAS-era behavior, kept for /health and /status);
+        # a provider name scopes the cap so e.g. seats.aero has its own budget alongside SAS.
+        self.provider = provider
 
     def used(self, day: str | None = None) -> int:
         day = day or _today()
+        sql = "SELECT COUNT(*) FROM provider_calls WHERE call_date = ?"
+        args: tuple = (day,)
+        if self.provider is not None:
+            sql += " AND provider = ?"
+            args = (day, self.provider)
         conn = db.connect(self.db_path)
         try:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM provider_calls WHERE call_date = ?", (day,)
-            ).fetchone()
+            row = conn.execute(sql, args).fetchone()
             return int(row[0])
         finally:
             conn.close()
@@ -55,8 +61,9 @@ class Budget:
     def check(self) -> None:
         """Raise BudgetExceeded if no budget is left for today. Call before a fetch."""
         if self.remaining() <= 0:
+            who = self.provider or "SAS"
             raise BudgetExceeded(
-                f"daily SAS request budget of {self.daily_limit} reached for {_today()}"
+                f"daily {who} request budget of {self.daily_limit} reached for {_today()}"
             )
 
     def record(self, call: ProviderCall) -> None:

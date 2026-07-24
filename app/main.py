@@ -21,11 +21,13 @@ from app.config import Settings, get_settings
 from app.db import init_db
 from app.fetch.engine import BrowserFetcher
 from app.providers.base import AwardProvider
-from app.providers.registry import build_fetcher, build_provider
+from app.providers.registry import build_fetcher, build_provider, build_skyteam_provider
 from app.scheduler import build_scheduler
 from app.services.explore import ExploreStore, ExploreSweeper
+from app.services.nl_search import NLQueryService
 from app.services.notify import AlertStore, Notifier
 from app.services.search import SearchService
+from app.services.skyteam import SkyTeamService
 from app.services.snapshots import SnapshotStore
 from app.services.value import CashFareStore, TripValueService, ZoneTable
 from app.services.watches import WatchRunner, WatchStore
@@ -50,6 +52,8 @@ class Services:
     watch_runner: WatchRunner
     explore: ExploreStore
     explore_sweeper: ExploreSweeper
+    skyteam: SkyTeamService | None = None    # SkyTeam tab; None without a seats.aero key
+    nl: NLQueryService | None = None         # NL search box; None without an Anthropic key
     scheduler: object | None = None
 
 
@@ -84,11 +88,32 @@ def build_services(settings: Settings) -> Services:
         min_stay_days=settings.explore_min_stay_days,
         max_stay_days=settings.explore_max_stay_days,
     )
+    # SkyTeam tab: a second seats.aero provider instance, ALWAYS distinct from `provider` even
+    # when AF_PROVIDER=seats_aero (separate httpx client / rate limiter; one shared API cap via
+    # the provider-scoped budget). Both close independently in the lifespan.
+    sky_provider = build_skyteam_provider(settings)
+    skyteam = (
+        SkyTeamService(
+            sky_provider, store, zones,
+            default_horizon_days=settings.skyteam_default_horizon_days,
+            sources=tuple(settings.skyteam_sources),
+        )
+        if sky_provider is not None else None
+    )
+    nl = (
+        NLQueryService(
+            settings.anthropic_api_key,
+            model=settings.anthropic_model,
+            home_airports=settings.home_airports,
+            regions=zones.zone_names,
+        )
+        if settings.anthropic_api_key else None
+    )
     return Services(
         settings=settings, store=store, provider=provider, fetcher=fetcher,
         search=search, zones=zones, cash_fares=cash_fares, values=values,
         watches=watches, alerts=alerts, notifier=notifier, watch_runner=watch_runner,
-        explore=explore, explore_sweeper=explore_sweeper,
+        explore=explore, explore_sweeper=explore_sweeper, skyteam=skyteam, nl=nl,
     )
 
 
@@ -123,6 +148,8 @@ async def lifespan(app: FastAPI):
             await services.fetcher.aclose()
         if hasattr(services.provider, "aclose"):    # seats.aero holds an httpx client
             await services.provider.aclose()
+        if services.skyteam is not None:            # the tab's own seats.aero client
+            await services.skyteam.aclose()
         log.info("award finder shut down")
 
 

@@ -32,6 +32,20 @@ def build_provider(settings: Settings, fetcher: BrowserFetcher) -> AwardProvider
     return SASDirectProvider(fetcher, rate, budget)
 
 
+def build_skyteam_provider(settings: Settings) -> SeatsAeroProvider | None:
+    """A SECOND seats.aero instance for the SkyTeam tab, independent of AF_PROVIDER: its own
+    (faster) rate limiter and its own provider-scoped daily budget. None without an API key —
+    the tab then renders a setup notice instead."""
+    if not settings.seats_aero_api_key:
+        return None
+    return SeatsAeroProvider(
+        settings.seats_aero_api_key,
+        RateLimiter(settings.seats_aero_min_interval_s, settings.seats_aero_max_interval_s),
+        Budget(settings.db_path, settings.seats_aero_daily_budget, provider="seats_aero"),
+        source=settings.seats_aero_source,
+    )
+
+
 def build_fetcher(settings: Settings) -> BrowserFetcher:
     return BrowserFetcher(
         profile_dir=settings.browser_profile_dir,

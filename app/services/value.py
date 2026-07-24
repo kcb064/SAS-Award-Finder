@@ -73,6 +73,13 @@ class ZoneTable:
 
     # ---- zone resolution -------------------------------------------------------------
 
+    @property
+    def zone_names(self) -> list[str]:
+        """Every zone the table knows (region choices for the SkyTeam tab / NL search)."""
+        names = set(self._country_to_zone.values()) | set(self._airport_zones.values())
+        names.add(self._default_zone)
+        return sorted(names)
+
     def zone_for(self, airport_code: str | None, country_name: str | None) -> str:
         if airport_code and airport_code.upper() in self._airport_zones:
             return self._airport_zones[airport_code.upper()]
