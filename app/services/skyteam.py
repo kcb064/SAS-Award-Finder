@@ -117,6 +117,12 @@ class SkyTeamService:
         continents into SCANDINAVIA/MIDDLE_EAST via country names). Ranked by how many cached
         (origin, source) routes serve each airport — partner-served first — then A-Z, capped
         at MAX_REGION_AIRPORTS.
+
+        When neither catalog knows the region from these origins (e.g. SOUTH_AMERICA from CPH:
+        no partner nonstop, and SAS never flies there), fall back to the region's airports
+        served from ANYWHERE in the route maps, ranked by how well-served they are overall.
+        /search decides whether any of those markets hold cached space — an empty result page
+        beats refusing to search.
         """
         region = region.strip().upper()
         if region not in self._zones.zone_names:
@@ -127,20 +133,28 @@ class SkyTeamService:
         catalog: dict[str, str | None] = {
             d["code"]: d["country_name"] for d in self._store.list_destinations()
         }
-        scores: dict[str, int] = {}
-        for source in self._sources or SKYTEAM_SOURCES:
-            for r in await self._routes(source):
-                if r.get("OriginAirport") not in origin_set:
-                    continue
-                code = str(r.get("DestinationAirport") or "").upper()
-                if not code or code in origin_set:
-                    continue
-                if self._zone_of(code, r.get("DestinationRegion"), catalog) != region:
-                    continue
-                scores[code] = scores.get(code, 0) + 1
+        route_maps = [await self._routes(source) for source in self._sources or SKYTEAM_SOURCES]
+
+        def scan(require_origin: bool) -> dict[str, int]:
+            scores: dict[str, int] = {}
+            for routes in route_maps:
+                for r in routes:
+                    if require_origin and r.get("OriginAirport") not in origin_set:
+                        continue
+                    code = str(r.get("DestinationAirport") or "").upper()
+                    if not code or code in origin_set:
+                        continue
+                    if self._zone_of(code, r.get("DestinationRegion"), catalog) != region:
+                        continue
+                    scores[code] = scores.get(code, 0) + 1
+            return scores
+
+        scores = scan(require_origin=True)
         for code, country in catalog.items():
             if code not in origin_set and self._zones.zone_for(code, country) == region:
                 scores.setdefault(code, 0)
+        if not scores:
+            scores = scan(require_origin=False)
         if not scores:
             raise ValueError(
                 f"no known airports in region {region} from {', '.join(sorted(origin_set))} — "

@@ -234,6 +234,21 @@ async def test_routes_failure_falls_back_to_sas_catalog(tmp_db, tmp_path, zones)
     assert result.destinations == ["BKK", "NRT"]
 
 
+async def test_unreachable_region_falls_back_to_region_wide_airports(tmp_db, tmp_path, zones):
+    # SOUTH_AMERICA from CPH: no partner nonstop from the origin and SAS never flies there —
+    # instead of erroring, expand to the region's airports served from anywhere, best-served
+    # first (GRU: 2 cached routes > EZE: 1). Other regions never leak in.
+    routes = [
+        _route("AMS", "GRU", "South America"),
+        _route("CDG", "GRU", "South America", source="delta"),
+        _route("AMS", "EZE", "South America"),
+        _route("CPH", "BKK", "Asia"),
+    ]
+    svc, _ = _service(tmp_db, tmp_path, zones, [_entries_for_dates(_future(10))],
+                      routes=routes, sources=("flyingblue", "delta"))
+    assert await svc.expand_region("SOUTH_AMERICA", ["CPH"]) == ["GRU", "EZE"]
+
+
 async def test_empty_region_suggests_catalog_refresh(tmp_db, tmp_path, zones):
     svc, _ = _service(tmp_db, tmp_path, zones, [_entries_for_dates(_future(10))],
                       sources=("flyingblue",))
