@@ -65,14 +65,33 @@
   </div>
 
   <div class="grid">
-    <label>From
+    <label>Trip
+      <select name="trip_type">
+        <option value="RT" {{ 'selected' if form.trip_type == 'RT' }}>Round-trip</option>
+        <option value="OW" {{ 'selected' if form.trip_type == 'OW' }}>One-way rows</option>
+      </select>
+    </label>
+    <label>Depart from
       <input type="date" name="date_from" value="{{ form.date_from }}" min="{{ today }}">
     </label>
-    <label>To
+    <label>Depart to
       <input type="date" name="date_to" value="{{ form.date_to }}" min="{{ today }}">
     </label>
     <label>Min seats / cabin
       <input type="number" name="min_seats" value="{{ form.min_seats }}" min="1" max="9">
+    </label>
+  </div>
+
+  <div class="grid">
+    <label class="rt-only">Min stay (days)
+      <input type="number" name="min_stay_days" value="{{ form.min_stay_days }}" min="0" max="365">
+    </label>
+    <label class="rt-only">Max stay (days)
+      <input type="number" name="max_stay_days" value="{{ form.max_stay_days }}" min="1" max="365">
+    </label>
+    <label class="checkbox rt-only">
+      <input type="checkbox" name="collapse" value="1" {{ 'checked' if form.collapse }}>
+      Best return per date
     </label>
     <label class="checkbox">
       <input type="checkbox" name="direct" value="1" {{ 'checked' if form.direct }}>
@@ -103,16 +122,75 @@
 {% if result is not none %}
 <section class="card">
   <div class="results-head">
+    {% if result.trip_type == 'RT' %}
+    <h2>{{ result.total }} round-trip option{{ '' if result.total == 1 else 's' }}</h2>
+    {% else %}
     <h2>{{ result.total }} availability row{{ '' if result.total == 1 else 's' }}</h2>
+    {% endif %}
     <span class="badge live">{{ result.date_from }} → {{ result.date_to }}</span>
     {% if result.region %}<span class="badge">{{ result.region | region_label }}</span>{% endif %}
   </div>
   {% if result.truncated %}
-  <div class="flash err">Showing the first {{ result.rows | length }} of {{ result.total }} rows —
-    narrow the dates, region, or cabin.</div>
+  <div class="flash err">Showing the first
+    {{ (result.trips if result.trip_type == 'RT' else result.rows) | length }} of
+    {{ result.total }} — narrow the dates, region, or cabin.</div>
   {% endif %}
 
-  {% if result.rows %}
+  {% if result.trip_type == 'RT' %}
+  {% if result.trips %}
+  {% set has_taxes = result.trips | selectattr('taxes_total') | list %}
+  {% set many_sources = result.trips | map(attribute='sources') | sum(start=()) | unique | list | length > 1 %}
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Route</th><th>Cabin</th><th>Outbound</th><th>Return</th><th>Stay</th>
+          <th>Seats</th><th>Airlines</th><th>Miles (r/t)</th>
+          {% if has_taxes %}<th>Taxes</th>{% endif %}
+          {% if many_sources %}<th>Program</th>{% endif %}<th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in result.trips %}
+        <tr>
+          <td>{{ t.out.origin }} ⇄ {{ t.out.destination }}</td>
+          <td class="cabin cabin-{{ t.out.cabin }}">{{ cabin_name(t.out.cabin) }}</td>
+          <td>{{ t.out.date }}</td>
+          <td>{{ t.ret.date }}</td>
+          <td>{{ t.stay_days }}d</td>
+          <td>{{ t.out.seats if t.out.seats > 0 else '1+' }} / {{ t.ret.seats if t.ret.seats > 0 else '1+' }}</td>
+          <td>{{ ((t.out.airlines + t.ret.airlines) | unique | join(', ')) or '—' }}</td>
+          <td>{{ t.mileage_total | int if t.mileage_total is not none else '—' }}</td>
+          {% if has_taxes %}
+          <td>{% if t.taxes_total is not none %}{{ '{:,.0f}'.format(t.taxes_total) }} {{ t.taxes_currency or '' }}{% else %}—{% endif %}</td>
+          {% endif %}
+          {% if many_sources %}<td>{{ t.sources | join(' / ') }}</td>{% endif %}
+          <td>
+            {% if t.voucher_usable %}
+              <span class="badge voucher" title="Both legs SAS-operated with 2+ confirmed seats">voucher-usable</span>
+            {% elif not (t.out.sas_operated and t.ret.sas_operated) %}
+              <span class="badge">Partner</span>
+            {% endif %}
+            {% if t.direct %}<span class="badge live">Direct</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">Miles &amp; taxes sum the two legs' own
+  <strong>{{ result.trips | map(attribute='sources') | sum(start=()) | unique | join(' / ') }}</strong>
+  pricing — EuroBonus prices this partner space differently (check flysas.com or call SAS to book
+  with your points). Trips marked <strong>voucher-usable</strong> have SAS-operated legs with 2+
+  confirmed seats both ways — verify the exact pair on the <a href="/search">Search</a> tab
+  before spending a 2-for-1 voucher.</p>
+  {% else %}
+  <p class="muted">No round-trips paired within {{ form.min_stay_days }}–{{ form.max_stay_days }}
+  day stays. Try a wider date window or stay range, another cabin — or switch Trip to
+  “One-way rows” to see each direction separately.</p>
+  {% endif %}
+
+  {% elif result.rows %}
   {% set has_taxes = result.rows | selectattr('total_taxes') | list %}
   {% set many_sources = result.rows | map(attribute='source') | unique | list | length > 1 %}
   <div class="table-scroll">

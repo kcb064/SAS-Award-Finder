@@ -287,6 +287,117 @@ async def test_filters_cabin_min_seats_sas_direct(tmp_db, tmp_path, zones):
     assert {row.cabin for row in r.rows} == {"AB"}
 
 
+# ---- round trips (trip_type="RT") ----------------------------------------------------------
+
+
+def _entry(origin: str, dest: str, d: str, *, source: str = "flyingblue", airlines: str = "SK",
+           seats: int = 2, mileage: str = "50000", taxes: int = 10000,
+           currency: str = "USD", direct: bool = True) -> dict:
+    return {
+        "Route": {"OriginAirport": origin, "DestinationAirport": dest, "Source": source},
+        "Date": d,
+        "JAvailable": True, "JRemainingSeats": seats, "JAirlines": airlines,
+        "JDirect": direct, "JMileageCost": mileage, "JTotalTaxes": taxes,
+        "TaxesCurrency": currency,
+    }
+
+
+def _page(*entries: dict) -> dict:
+    return {"data": list(entries), "hasMore": False, "cursor": None}
+
+
+async def test_round_trip_pairs_legs_and_swaps_direction(tmp_db, tmp_path, zones):
+    out_page = _page(_entry("CPH", "BKK", _future(10)))
+    ret_page = _page(
+        _entry("BKK", "CPH", _future(12)),   # stay 2 — below the default min_stay 3
+        _entry("BKK", "CPH", _future(15)),   # stay 5 — pairs
+        _entry("BKK", "CPH", _future(40)),   # stay 30 — beyond max_stay 14 (and the window)
+    )
+    svc, seen = _service(tmp_db, tmp_path, zones, [out_page, ret_page])
+    result = await svc.search(
+        origins=["CPH"], destinations=["BKK"],
+        date_from=_future(1), date_to=_future(20), trip_type="RT",
+    )
+    assert result.trip_type == "RT"
+    assert result.rows == []
+    assert [(t.out.date, t.ret.date, t.stay_days) for t in result.trips] == [
+        (_future(10), _future(15), 5)
+    ]
+    # The second budgeted call swaps the airport lists and shifts the window by the stay bounds.
+    assert seen[1].url.params["origin_airport"] == "BKK"
+    assert seen[1].url.params["destination_airport"] == "CPH"
+    assert seen[1].url.params["start_date"] == _future(4)
+    assert seen[1].url.params["end_date"] == _future(34)
+    assert Budget(tmp_db, 50, provider="seats_aero").used() == 2
+
+
+async def test_round_trip_totals_and_voucher_flag(tmp_db, tmp_path, zones):
+    out_page = _page(_entry("CPH", "BKK", _future(10), mileage="50000", taxes=10000))
+    ret_page = _page(_entry("BKK", "CPH", _future(15), mileage="60000", taxes=20000))
+    svc, _ = _service(tmp_db, tmp_path, zones, [out_page, ret_page])
+    result = await svc.search(origins=["CPH"], destinations=["BKK"], trip_type="RT")
+    t = result.trips[0]
+    assert t.mileage_total == 110000
+    assert t.taxes_total == 300.0          # 10000 + 20000 minor units, same currency
+    assert t.taxes_currency == "USD"
+    assert t.voucher_usable is True        # SK metal, 2 confirmed seats each leg
+    assert t.direct is True
+    assert t.sources == ("flyingblue",)
+
+
+async def test_round_trip_mixed_currency_taxes_stay_unsummed(tmp_db, tmp_path, zones):
+    out_page = _page(_entry("CPH", "BKK", _future(10), currency="USD"))
+    ret_page = _page(_entry("BKK", "CPH", _future(15), currency="DKK"))
+    svc, _ = _service(tmp_db, tmp_path, zones, [out_page, ret_page])
+    result = await svc.search(origins=["CPH"], destinations=["BKK"], trip_type="RT")
+    t = result.trips[0]
+    assert t.mileage_total == 100000       # miles still sum
+    assert t.taxes_total is None           # USD + DKK is not a number
+    assert t.taxes_currency is None
+
+
+async def test_round_trip_collapse_picks_best_return(tmp_db, tmp_path, zones):
+    out_page = _page(_entry("CPH", "BKK", _future(10)))
+    ret_page = _page(
+        _entry("BKK", "CPH", _future(14), seats=1),
+        _entry("BKK", "CPH", _future(17), seats=3),
+    )
+    pages = [out_page, ret_page, out_page, ret_page]
+    svc, _ = _service(tmp_db, tmp_path, zones, pages)
+    # Collapsed (default): the weaker-leg seat count decides — min(2,3)=2 beats min(2,1)=1.
+    result = await svc.search(origins=["CPH"], destinations=["BKK"], trip_type="RT")
+    assert [t.ret.date for t in result.trips] == [_future(17)]
+    result = await svc.search(
+        origins=["CPH"], destinations=["BKK"], trip_type="RT", collapse=False,
+    )
+    assert [t.ret.date for t in result.trips] == [_future(14), _future(17)]
+
+
+async def test_round_trip_dedupes_same_space_across_sources(tmp_db, tmp_path, zones):
+    # Two programs report the same date+route+cabin: one trip, and the SAS-operated report
+    # wins the leg even against more partner-metal seats (voucher relevance).
+    out_page = _page(
+        _entry("CPH", "BKK", _future(10), source="flyingblue", airlines="SK", seats=2),
+        _entry("CPH", "BKK", _future(10), source="delta", airlines="KL", seats=4),
+    )
+    ret_page = _page(_entry("BKK", "CPH", _future(15)))
+    svc, _ = _service(tmp_db, tmp_path, zones, [out_page, ret_page])
+    result = await svc.search(origins=["CPH"], destinations=["BKK"], trip_type="RT")
+    assert len(result.trips) == 1
+    assert result.trips[0].out.source == "flyingblue"
+    assert result.trips[0].out.sas_operated is True
+
+
+async def test_round_trip_truncation_reports_total(tmp_db, tmp_path, zones):
+    out_page = _page(_entry("CPH", "BKK", _future(10)), _entry("CPH", "BKK", _future(11)))
+    ret_page = _page(_entry("BKK", "CPH", _future(16)))
+    svc, _ = _service(tmp_db, tmp_path, zones, [out_page, ret_page], max_rows=1)
+    result = await svc.search(origins=["CPH"], destinations=["BKK"], trip_type="RT")
+    assert result.total == 2
+    assert result.truncated is True
+    assert len(result.trips) == 1
+
+
 async def test_default_window_and_past_clamp(tmp_db, tmp_path, zones):
     svc, seen = _service(tmp_db, tmp_path, zones, [_entries_for_dates(_future(3))])
     result = await svc.search(origins=["CPH"], destinations=["BKK"], date_from="2020-01-01")

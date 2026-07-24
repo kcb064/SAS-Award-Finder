@@ -94,6 +94,8 @@ def _system_prompt(today: str, home_airports: list[str], regions: list[str]) -> 
         f"- Cabin: economy -> AG, premium economy -> AP, business -> AB. Null when unstated.\n"
         f"- voucher_intent is true when the query mentions a 2-for-1 / companion voucher or "
         f"traveling as a pair on one award.\n"
+        f"- trip_type: OW only when the query says one-way; RT when a return or stay is "
+        f"implied ('a week in...', 'back by...'). Null when nothing hints either way.\n"
         f"- summary: one short sentence stating your interpretation, e.g. "
         f"'Flights CPH → Asia, 2026-10-01 to 2026-10-31, any cabin, 2-for-1 voucher intent.'"
     )

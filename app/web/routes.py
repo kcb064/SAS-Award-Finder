@@ -215,8 +215,12 @@ async def skyteam_page(
     origin: str = Query(default=""),
     destination: str = Query(default=""),
     region: str = Query(default=""),
+    trip_type: str = Query(default="RT"),
     date_from: str = Query(default=""),
     date_to: str = Query(default=""),
+    min_stay_days: int = Query(default=3),
+    max_stay_days: int = Query(default=14),
+    collapse: int | None = Query(default=None),
     cabin: str = Query(default=""),
     min_seats: int = Query(default=1),
     voucher: int = Query(default=0),
@@ -231,8 +235,14 @@ async def skyteam_page(
         "origin": origin.strip().upper(),
         "destination": destination.strip().upper(),
         "region": region.strip().upper(),
+        "trip_type": trip_type if trip_type in ("RT", "OW") else "RT",
         "date_from": date_from,
         "date_to": date_to,
+        "min_stay_days": min_stay_days,
+        "max_stay_days": max_stay_days,
+        # An unchecked checkbox is simply absent from the query — only treat absence as "off"
+        # when the structured form was actually submitted; fresh visits default to collapsed.
+        "collapse": collapse if collapse is not None else (0 if submitted else 1),
         "cabin": cabin,
         "min_seats": min_seats,
         "voucher": voucher,
@@ -275,6 +285,7 @@ async def skyteam_page(
                     "origin": ",".join(params.origins),
                     "destination": ",".join(params.destinations),
                     "region": params.region or "",
+                    "trip_type": params.trip_type or "RT",
                     "date_from": params.date_from or "",
                     "date_to": params.date_to or "",
                     "cabin": params.cabin or "",
@@ -303,6 +314,10 @@ async def skyteam_page(
                 min_seats=min_s,
                 sas_only=bool(form["voucher"]),
                 direct_only=bool(form["direct"]),
+                trip_type=form["trip_type"],
+                min_stay_days=int(form["min_stay_days"]),
+                max_stay_days=int(form["max_stay_days"]),
+                collapse=bool(form["collapse"]),
             )
         except BudgetExceeded as exc:
             context["error"] = (

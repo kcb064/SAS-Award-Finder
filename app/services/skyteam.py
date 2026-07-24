@@ -4,12 +4,19 @@ points table. Results are fetched, filtered, rendered, and forgotten (seats.aero
 cache), so there is no schema for them; pricing shown is seats.aero's own MileageCost, never a
 zone estimate (the EuroBonus zone table doesn't price partner metal). The one thing held in
 memory is the per-source seats.aero route map that region searches expand against.
+
+Round trips mirror services/trips.py: a second /search covers the return direction
+(destinations -> origins, window shifted by the stay bounds), and legs pair per route+cabin when
+the stay length lands inside [min_stay_days, max_stay_days]. Pairing happens here rather than in
+trips.py because SkyTeamRow carries fields AwardFlight has no room for (partner airlines,
+per-program mileage, taxes).
 """
 from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 import httpx
@@ -45,16 +52,121 @@ _SA_REGION_TO_ZONE = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class SkyTeamTrip:
+    """One bookable round-trip pairing of two SkyTeamRow legs (same route reversed, same cabin).
+
+    Totals are only summed when they mean something: mileage when BOTH legs carry a price (the
+    legs may come from different programs — still indicative, the hint under the table already
+    says EuroBonus prices differently), taxes only when both legs quote the same currency.
+    """
+
+    out: SkyTeamRow
+    ret: SkyTeamRow
+    stay_days: int
+    mileage_total: int | None
+    taxes_total: float | None
+    taxes_currency: str | None
+    direct: bool | None              # True = both legs direct, False = a leg isn't, None = unknown
+    voucher_usable: bool             # both legs SAS-operated with >=2 CONFIRMED seats
+    sources: tuple[str, ...]
+
+
+def _make_trip(out: SkyTeamRow, ret: SkyTeamRow, stay_days: int) -> SkyTeamTrip:
+    mileage = (
+        out.mileage_cost + ret.mileage_cost
+        if out.mileage_cost is not None and ret.mileage_cost is not None else None
+    )
+    if (out.total_taxes is not None and ret.total_taxes is not None
+            and out.taxes_currency == ret.taxes_currency):
+        taxes, currency = out.total_taxes + ret.total_taxes, out.taxes_currency
+    else:
+        taxes, currency = None, None
+    if out.direct is False or ret.direct is False:
+        direct: bool | None = False
+    elif out.direct and ret.direct:
+        direct = True
+    else:
+        direct = None
+    return SkyTeamTrip(
+        out=out, ret=ret, stay_days=stay_days,
+        mileage_total=mileage, taxes_total=taxes, taxes_currency=currency,
+        direct=direct,
+        voucher_usable=(out.sas_operated and ret.sas_operated
+                        and out.seats >= 2 and ret.seats >= 2),
+        sources=tuple(dict.fromkeys((out.source, ret.source))),
+    )
+
+
+def _dedupe_legs(rows: list[SkyTeamRow]) -> list[SkyTeamRow]:
+    """One row per (date, route, cabin) before pairing — several programs usually report the
+    SAME physical award space, and pairing the cross product would multiply identical trips.
+    Prefer the SAS-operated report (voucher relevance), then more confirmed seats, then a row
+    that carries a mileage price."""
+    best: dict[tuple[str, str, str, str], SkyTeamRow] = {}
+    for r in rows:
+        k = (r.date, r.origin, r.destination, r.cabin)
+        cur = best.get(k)
+        if cur is None or _leg_rank(r) > _leg_rank(cur):
+            best[k] = r
+    return list(best.values())
+
+
+def _leg_rank(r: SkyTeamRow) -> tuple[bool, int, bool]:
+    return (r.sas_operated, r.seats, r.mileage_cost is not None)
+
+
+def _pair_round_trips(
+    out_rows: list[SkyTeamRow], ret_rows: list[SkyTeamRow],
+    *, min_stay_days: int, max_stay_days: int,
+) -> list[SkyTeamTrip]:
+    by_route: dict[tuple[str, str, str], list[SkyTeamRow]] = defaultdict(list)
+    for r in ret_rows:
+        by_route[(r.origin, r.destination, r.cabin)].append(r)
+    trips: list[SkyTeamTrip] = []
+    for o in out_rows:
+        out_day = date.fromisoformat(o.date)
+        for r in by_route.get((o.destination, o.origin, o.cabin), ()):
+            stay = (date.fromisoformat(r.date) - out_day).days
+            if min_stay_days <= stay <= max_stay_days:
+                trips.append(_make_trip(o, r, stay))
+    trips.sort(key=lambda t: (
+        t.out.date, t.ret.date, t.out.origin, t.out.destination, t.out.cabin,
+    ))
+    return trips
+
+
+def _best_return_per_outbound(trips: list[SkyTeamTrip]) -> list[SkyTeamTrip]:
+    """Collapse to the single best return per (route, outbound date, cabin): the most seats on
+    the weaker leg, then the shortest stay — same rule as trips.best_round_trip_per_outbound.
+    An unknown count (0) ranks as 1 ("at least one")."""
+    best: dict[tuple[str, str, str, str], SkyTeamTrip] = {}
+    for t in trips:
+        k = (t.out.origin, t.out.destination, t.out.date, t.out.cabin)
+        cur = best.get(k)
+        if cur is None or _trip_rank(t) > _trip_rank(cur):
+            best[k] = t
+    return sorted(best.values(), key=lambda t: (
+        t.out.date, t.out.origin, t.out.destination, t.out.cabin,
+    ))
+
+
+def _trip_rank(t: SkyTeamTrip) -> tuple[int, int]:
+    return (min(t.out.seats or 1, t.ret.seats or 1), -t.stay_days)
+
+
 @dataclass(slots=True)
 class SkyTeamResult:
     rows: list[SkyTeamRow]
-    total: int                       # rows matched before truncation
+    total: int                       # rows (OW) / trips (RT) matched before truncation
     truncated: bool
     origins: list[str]
     destinations: list[str] | None   # resolved list actually sent (None = anywhere)
     region: str | None
     date_from: str
     date_to: str
+    trip_type: str = "OW"
+    trips: list[SkyTeamTrip] = field(default_factory=list)
 
 
 class SkyTeamService:
@@ -163,6 +275,16 @@ class SkyTeamService:
         ranked = sorted(scores, key=lambda c: (-scores[c], c))
         return ranked[:MAX_REGION_AIRPORTS]
 
+    async def _partner_rows(
+        self, origins: list[str], destinations: list[str], start: str, end: str
+    ) -> list[SkyTeamRow]:
+        entries = await self._provider.search_entries(
+            origins, destinations, start_date=start, end_date=end,
+        )
+        if self._sources:
+            return parse_partner_rows({"data": entries}, sources=self._sources)
+        return parse_partner_rows({"data": entries})
+
     async def search(
         self,
         *,
@@ -175,6 +297,10 @@ class SkyTeamService:
         min_seats: int = 1,
         sas_only: bool = False,
         direct_only: bool = False,
+        trip_type: str = "OW",
+        min_stay_days: int = 3,
+        max_stay_days: int = 14,
+        collapse: bool = True,
     ) -> SkyTeamResult:
         origins = [o.strip().upper() for o in origins if o.strip()]
         today = date.today()
@@ -193,16 +319,8 @@ class SkyTeamService:
                 "seats.aero needs destinations — pick a region or name destination airports"
             )
 
-        entries = await self._provider.search_entries(
-            origins, destinations, start_date=start, end_date=end,
-        )
-        if self._sources:
-            rows = parse_partner_rows({"data": entries}, sources=self._sources)
-        else:
-            rows = parse_partner_rows({"data": entries})
-
-        def keep(r: SkyTeamRow) -> bool:
-            if not (start <= r.date <= end):
+        def keep(r: SkyTeamRow, lo: str, hi: str) -> bool:
+            if not (lo <= r.date <= hi):
                 return False
             if cabin and r.cabin != cabin:
                 return False
@@ -215,9 +333,45 @@ class SkyTeamService:
                 return False
             return True
 
+        out_rows = [
+            r for r in await self._partner_rows(origins, destinations, start, end)
+            if keep(r, start, end)
+        ]
+
+        if trip_type == "RT":
+            max_stay_days = max(min_stay_days, max_stay_days)
+            # The return window is the outbound window shifted by the stay bounds — a second
+            # budgeted /search with the airport lists swapped.
+            ret_start = max(
+                (date.fromisoformat(start) + timedelta(days=min_stay_days)).isoformat(),
+                today.isoformat(),
+            )
+            ret_end = (date.fromisoformat(end) + timedelta(days=max_stay_days)).isoformat()
+            ret_rows = [
+                r for r in await self._partner_rows(destinations, origins, ret_start, ret_end)
+                if keep(r, ret_start, ret_end)
+            ]
+            trips = _pair_round_trips(
+                _dedupe_legs(out_rows), _dedupe_legs(ret_rows),
+                min_stay_days=min_stay_days, max_stay_days=max_stay_days,
+            )
+            if collapse:
+                trips = _best_return_per_outbound(trips)
+            return SkyTeamResult(
+                rows=[],
+                total=len(trips),
+                truncated=len(trips) > self._max_rows,
+                origins=origins,
+                destinations=destinations,
+                region=region,
+                date_from=start,
+                date_to=end,
+                trip_type="RT",
+                trips=trips[: self._max_rows],
+            )
+
         matched = sorted(
-            (r for r in rows if keep(r)),
-            key=lambda r: (r.date, r.origin, r.destination, r.cabin),
+            out_rows, key=lambda r: (r.date, r.origin, r.destination, r.cabin),
         )
         return SkyTeamResult(
             rows=matched[: self._max_rows],
